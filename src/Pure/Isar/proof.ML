@@ -145,6 +145,7 @@ sig
   val future_proof: (state -> ('a * context) future) -> state -> 'a future * state
   val local_future_terminal_proof: Method.text_range * Method.text_range option -> state -> state
   val global_future_terminal_proof: Method.text_range * Method.text_range option -> state -> context
+  val the_fact_or_facts: state -> thm list
 end;
 
 structure Proof: PROOF =
@@ -248,6 +249,11 @@ fun report_improper state =
   Context_Position.report (context_of state) (Position.thread_data ()) Markup.improper;
 
 val get_facts = #facts o top;
+
+fun the_fact_or_facts state =
+  (case get_facts state of
+    SOME (facts, proper) => (if proper then () else report_improper state; facts)
+  | NONE => []);
 
 fun the_facts state =
   (case get_facts state of
