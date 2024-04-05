@@ -107,4 +107,4 @@ fun to_string (ProofChanges {changes, total_proofs, successful_changes}) =
   in
     String.concatWith "\n" changes_str ^ "\n" ^ stats
   end;
-end;
+end;

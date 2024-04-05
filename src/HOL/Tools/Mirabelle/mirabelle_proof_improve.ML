@@ -68,4 +68,4 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
       end
 
     val () = Mirabelle.register_action "proof_improve" make_action
-end;
+end;

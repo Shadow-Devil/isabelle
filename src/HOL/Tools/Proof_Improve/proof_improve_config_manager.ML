@@ -76,4 +76,4 @@ struct
   fun get_max_apply () = let val Config cfg = default_config in #max_apply cfg end
   fun get_normalize_mode () = let val Config cfg = default_config in #normalize_mode cfg end
   fun get_logging () = let val Config cfg = default_config in #logging cfg end
-end;
+end;

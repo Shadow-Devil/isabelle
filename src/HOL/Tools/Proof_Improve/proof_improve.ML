@@ -34,6 +34,7 @@ fun string_of_outcome outcome =
     | ScoreNotLowered log => "Score Not Lowered\n" ^ log
     | GoodEnoughUnderCutoff log => "Good Enough; The Score is under the Cutoff\n" ^ log
 
+
 fun proof_improve st proof_text =
   let
     val (original_score, original_log) = score
@@ -66,4 +67,4 @@ fun proof_improve st proof_text =
             Unknown (combined_log ^ "\n\n")
         end
   end;
-end
+end
