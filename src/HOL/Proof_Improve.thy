@@ -5,7 +5,7 @@
 section \<open>Proof Improve: Semi-Automatic Proof Improvement\<close>
 
 theory Proof_Improve
-  imports Sledgehammer
+  imports HOL.Sledgehammer
 begin
 
 
