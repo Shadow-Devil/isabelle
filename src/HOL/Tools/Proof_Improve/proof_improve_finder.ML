@@ -23,7 +23,7 @@ fun parse_sledgehammer_result (result: string) : string =
       else
         result
 
-    fun rindex_from (s, c, i) =
+    fun rindex_from (s: string, c: char, i: int) =
       if i < 0 then NONE
       else if String.sub (s, i) = c then SOME i
       else rindex_from (s, c, i - 1)
@@ -33,15 +33,15 @@ fun parse_sledgehammer_result (result: string) : string =
         NONE => result_without_prefix
       | SOME i => String.extract (result_without_prefix, 0, SOME i)
 
-    val result_trimmed =
-      if size result_without_timing > 0 andalso String.sub
-      (result_without_timing, size result_without_timing - 1) = #" " then
-        String.extract (result_without_timing, 0, SOME (size result_without_timing - 1))
-      else
-        result_without_timing
-  in
-    result_trimmed
-  end;
+  val result_trimmed =
+    if size result_without_timing > 0 andalso 
+        String.sub (result_without_timing, size result_without_timing - 1) = #" " then
+      String.extract (result_without_timing, 0, SOME (size result_without_timing - 1))
+    else
+      result_without_timing
+in
+  result_trimmed
+end;
 
 
 fun find (st: Proof.state) =
@@ -78,8 +78,9 @@ fun find (st: Proof.state) =
       timeout = four_seconds,
       preplay_timeout = four_seconds,
       expect = #expect params
-      }
+    }  
 
+    (* TODO: fill this add array and enable only *)
     val fact_override = {add = [], del = [], only = false}
     val (_, (outcome, try_this)) =  Sledgehammer.run_sledgehammer timeout_params
       Sledgehammer_Prover.Normal NONE 1 fact_override st

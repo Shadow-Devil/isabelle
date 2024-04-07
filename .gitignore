@@ -1,2 +1,3 @@
 /lib/classes/*
-/bin/mirabelle/mirabelle.log
+*.log
+*~

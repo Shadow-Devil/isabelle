@@ -191,7 +191,7 @@ fun score facts proof_text  =
 
     val symbol_to_text_ratio_score = calculate_symbol_to_text_ratio proof_text
     val symbol_to_text_ratio_report = "Symbol to text ratio score: " ^
-    Real.toString symbol_to_text_ratio_score ^ "\n"
+      Real.toString symbol_to_text_ratio_score ^ "\n"
 
     val depth_score = normalize_score_int (normalize_mode, calculate_depth proof_text, max_depth)
     val depth_report = "Proof depth score: " ^ Real.toString depth_score ^ "\n"

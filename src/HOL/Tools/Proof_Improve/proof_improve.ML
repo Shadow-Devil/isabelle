@@ -6,10 +6,10 @@ This module provides utilities for improving Isabelle proofs.
 signature PROOF_IMPROVE =
 sig
    datatype outcome = FoundAlternative of  string * string
-              | Unknown of string
-              | ScoreNotLowered of string
-              | NoAlternativeFound of string
-              | GoodEnoughUnderCutoff of string
+                    | Unknown of string
+                    | ScoreNotLowered of string
+                    | NoAlternativeFound of string
+                    | GoodEnoughUnderCutoff of string
 
   val proof_improve : Proof.state -> string -> outcome
   val string_of_outcome : outcome -> string
@@ -21,10 +21,10 @@ open Proof_Improve_Scorer
 open Proof_Improve_Finder
 
 datatype outcome = FoundAlternative of string * string
-           | Unknown of string
-           | ScoreNotLowered of string
-           | NoAlternativeFound of string
-           | GoodEnoughUnderCutoff of string
+                 | Unknown of string
+                 | ScoreNotLowered of string
+                 | NoAlternativeFound of string
+                 | GoodEnoughUnderCutoff of string
 
 fun string_of_outcome outcome =
   case outcome of
@@ -40,13 +40,13 @@ fun proof_improve st proof_text =
     val (original_score, original_log) = score
       (List.length (Proof.the_fact_or_facts st)) proof_text
     val original_score_msg = "Scorer result (original): " ^ Real.toString original_score
-    val find_result = find st
+    (*val find_result = find st*)
     val initial_log = original_log ^ original_score_msg
   in
     if original_score < 4.5 then
       GoodEnoughUnderCutoff (initial_log ^ "\n\n")
     else
-      case find_result of
+      case find st of
         NONE =>
           let
             val log_msg = initial_log ^ "\nNo potential rewrite found."

@@ -63,9 +63,9 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
       end
 
     fun finalize () : string = to_string (Synchronized.value data)
-      in
-        ("", {run = run, finalize = finalize})
-      end
+  in
+    ("", {run = run, finalize = finalize})
+  end
 
-    val () = Mirabelle.register_action "proof_improve" make_action
+val () = Mirabelle.register_action "proof_improve" make_action
 end;
