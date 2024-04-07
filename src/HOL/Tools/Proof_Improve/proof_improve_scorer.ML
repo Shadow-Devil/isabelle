@@ -160,7 +160,7 @@ fun normalize_score_int (mode, value: int, max_value) : real =
 
 structure Proof_Improve_Scorer : PROOF_IMPROVE_SCORER =
 struct
-fun score facts proof_text  =
+fun score facts proof_text =
   let
     val normalize_mode = get_normalize_mode ()
     val logging = get_logging ()
@@ -178,15 +178,15 @@ fun score facts proof_text  =
     val max_depth  = get_max_depth ()
     val max_apply = get_max_apply ()
 
-    val length_score = normalize_score_int (normalize_mode, calculate_length_score proof_text,
-      max_length)
+    val length_score = normalize_score_int 
+                        (normalize_mode, calculate_length_score proof_text, max_length)
     val length_report = "Length score: " ^ Real.toString length_score ^ "\n"
 
     val fact_score = normalize_score_int (normalize_mode, facts, max_lemma)
     val fact_report = "Fact score: " ^ Real.toString fact_score ^ "\n"
 
-    val entropy_score = normalize_score_real (normalize_mode, calculate_entropy_score proof_text,
-      max_entropy)
+    val entropy_score = normalize_score_real 
+                          (normalize_mode, calculate_entropy_score proof_text, max_entropy)
     val entropy_report = "Entropy score: " ^ Real.toString entropy_score ^ "\n"
 
     val symbol_to_text_ratio_score = calculate_symbol_to_text_ratio proof_text
@@ -217,14 +217,14 @@ fun score facts proof_text  =
     val normalized_score = weighted_sum / total_weight
 
     val logs =
-    if logging then
-      length_report ^ fact_report ^ entropy_report ^  symbol_to_text_ratio_report
-      ^ depth_report ^ apply_report ^ used_methods_report ^ "Proof Text: " ^ proof_text ^ "\n"
-    else ""
+      if logging then
+        length_report ^ fact_report ^ entropy_report ^  symbol_to_text_ratio_report
+        ^ depth_report ^ apply_report ^ used_methods_report ^ "Proof Text: " ^ proof_text ^ "\n"
+      else ""
   in
     (normalized_score, logs)
   end;
 
-  fun score_state st proof_text = score (List.length (Proof.the_facts st)) proof_text
-  fun score_thm thms proof_text = score (List.length thms) proof_text
+fun score_state st proof_text = score (List.length (Proof.the_facts st)) proof_text
+fun score_thm thms proof_text = score (List.length thms) proof_text
 end;
