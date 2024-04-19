@@ -6,7 +6,7 @@ Finding proof alternatives using Sledgehammer.
 
 signature PROOF_IMPROVE_FINDER =
 sig
-  val find: Proof.state -> (int * string) option
+  val find: Proof.state -> string list -> (int * string) option
 end;
 
 structure Proof_Improve_Finder: PROOF_IMPROVE_FINDER =
@@ -31,21 +31,26 @@ fun parse_sledgehammer_result (result: string) : string =
     val result_without_timing =
       case rindex_from (result_without_prefix, #"(", size result_without_prefix - 1) of
         NONE => result_without_prefix
-      | SOME i => String.extract (result_without_prefix, 0, SOME i)
+      | SOME i => String.substring (result_without_prefix, 0, i)
 
   val result_trimmed =
-    if size result_without_timing > 0 andalso 
-        String.sub (result_without_timing, size result_without_timing - 1) = #" " then
-      String.extract (result_without_timing, 0, SOME (size result_without_timing - 1))
+    if String.isSuffix (result_without_timing) " " then
+      String.substring (result_without_timing, 0, size result_without_timing - 1)
     else
       result_without_timing
 in
   result_trimmed
 end;
 
+val test = writeln (parse_sledgehammer_result "Try this: by simp (3 ms)");
 
-fun find (st: Proof.state) =
+
+fun find (st: Proof.state) thms =
   let
+(* 
+Try0.try0 : Time.time option -> string list * string list * string list * string list -> Proof.state -> bool 
+Try0.try0 None (simp, intro, elim, del) st
+*)
     val params = Sledgehammer_Commands.default_params \<^theory> []
     val four_seconds = Time.fromSeconds 4
 
@@ -81,7 +86,7 @@ fun find (st: Proof.state) =
     }  
 
     (* TODO: fill this add array and enable only *)
-    val fact_override = {add = [], del = [], only = false}
+    val fact_override = {add = map (fn thm => (Facts.named thm, [])) thms, del = [], only = true}
     val (_, (outcome, try_this)) =  Sledgehammer.run_sledgehammer timeout_params
       Sledgehammer_Prover.Normal NONE 1 fact_override st
   in
@@ -96,7 +101,7 @@ fun find (st: Proof.state) =
              if String.isSubstring "failed" result orelse String.isSubstring "apply" result then
                NONE
              else
-               SOME (List.length facts, parse_sledgehammer_result try_this)
+               SOME (List.length facts, result)
            end
          | SOME _ => NONE)
     | _ => NONE

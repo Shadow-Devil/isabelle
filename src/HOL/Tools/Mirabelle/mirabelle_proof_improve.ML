@@ -37,19 +37,47 @@ fun get_content spans : string =
     concat_tokens (non_comment_tokens, "")
   end;
 
+fun get_thms (st: Proof.state) (st': Toplevel.state) : (string * thm list) list =
+  let
+    val get_facts: Toplevel.state -> Facts.T  = Proof_Context.facts_of o Proof.context_of o Toplevel.proof_of
+    val facts = (Proof_Context.facts_of o Proof.context_of) st
+    val (factss, facts') = (
+      if Toplevel.is_proof st' then
+        ([facts], get_facts st')
+      else
+        let
+          val ctxt = Toplevel.context_of st';
+          val prev_thys =
+            (case Toplevel.previous_theory_of st' of
+              SOME thy => [thy]
+            | NONE => Theory.parents_of (Proof_Context.theory_of ctxt));
+          val factss = map Global_Theory.facts_of prev_thys
+          val facts' = Global_Theory.facts_of (Proof_Context.theory_of ctxt)
+        in (factss, facts') end)
+    in (Facts.dest_static false factss facts') end;
+
 
 fun make_action ({timeout, ...} : Mirabelle.action_context) =
   let
     val generous_timeout = Time.scale 1000.0 timeout
 
-    fun run ({pre, spans, pos, ...} : Mirabelle.command) : string =
+    fun run ({pre, spans, pos, post, ...} : Mirabelle.command) : string =
       let
+        (*See also: mirabelle_metis.ML *)
+        val thms = Mirabelle.theorems_of_sucessful_proof post;
+        val thms_names = map Thm.derivation_name thms;
+        val thms1 = get_thms pre post;
+        val thms1_names = map (fn (s, thms) => s ^ "(" ^ (String.concatWith " " (map Thm.get_name_hint thms)) ^ ")") thms1;
+        (* todo: why empty?
+        val facts = map #1 (Facts.props (Proof_Context.facts_of (Proof.context_of pre)));
+        val facts_names = map Thm.get_name_hint facts;
+        *)
         val proof_text = get_content spans
         val outcome =
           if proof_text = "" then
             Unknown "segment could not be matched\n"
           else
-            Timeout.apply generous_timeout (proof_improve) pre proof_text
+            Timeout.apply generous_timeout (proof_improve) pre proof_text (thms_names)
         val current_data = Synchronized.value data
         val updated_data =
           case outcome of
@@ -59,7 +87,10 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
                add_unsuccessful_call current_data
       in
         Synchronized.change data (fn _ => updated_data);
-        "Outcome: " ^ string_of_outcome outcome ^ "\n"
+        "Outcome: " ^ string_of_outcome outcome ^ "\n" ^
+        "Thms: " ^ (String.concatWith " " thms_names) ^ "\n" ^
+        "Thms1: " ^ (String.concatWith " " thms1_names) ^ "\n"
+        (* ^ "Facts: " ^ (String.concatWith ", " facts_names) ^ "\n" *)
       end
 
     fun finalize () : string = to_string (Synchronized.value data)
