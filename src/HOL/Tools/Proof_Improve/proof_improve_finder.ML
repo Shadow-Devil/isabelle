@@ -14,7 +14,8 @@ struct
 
 fun parse_sledgehammer_result (result: string) : string =
   let
-    val prefix = "Try this: "
+    val prefix = "Auto Try0 found a proof: "
+    (*val prefix = "Try this: "*)
     val prefix_len = size prefix
 
     val result_without_prefix =
@@ -41,8 +42,6 @@ fun parse_sledgehammer_result (result: string) : string =
 in
   result_trimmed
 end;
-
-val test = writeln (parse_sledgehammer_result "Try this: by simp (3 ms)");
 
 
 fun find (st: Proof.state) thms =
@@ -87,7 +86,7 @@ Try0.try0 None (simp, intro, elim, del) st
 
     (* TODO: fill this add array and enable only *)
     val fact_override = {add = map (fn thm => (Facts.named thm, [])) thms, del = [], only = true}
-    val (_, (outcome, try_this)) =  Sledgehammer.run_sledgehammer timeout_params
+    (*val (_, (outcome, try_this)) =  Sledgehammer.run_sledgehammer timeout_params
       Sledgehammer_Prover.Normal NONE 1 fact_override st
   in
     case outcome of
@@ -106,4 +105,11 @@ Try0.try0 None (simp, intro, elim, del) st
          | SOME _ => NONE)
     | _ => NONE
   end
+*)
+  val (successful, (name, [message])) = Try0.generic_try0 Try0.Auto_Try NONE (thms, [], [], []) st
+  in
+    if successful then
+      SOME (length thms, parse_sledgehammer_result message)
+    else NONE
+end
 end;

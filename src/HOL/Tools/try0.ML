@@ -10,6 +10,9 @@ sig
   val silence_methods : bool -> Proof.context -> Proof.context
   val try0 : Time.time option -> string list * string list * string list * string list ->
     Proof.state -> bool
+  datatype mode = Auto_Try | Try | Normal;
+  val generic_try0 : mode -> Time.time option -> string list * string list * string list * string list
+    -> Proof.state -> bool * (string * string list) 
 end;
 
 structure Try0 : TRY0 =
@@ -188,6 +191,7 @@ fun parse_attrs x =
 val _ =
   Outer_Syntax.command \<^command_keyword>\<open>try0\<close> "try a combination of proof methods"
     (Scan.optional parse_attrs ([], [], [], []) #>> try0_trans);
+
 
 val _ =
   Try.tool_setup
