@@ -43,7 +43,7 @@ fun proof_improve st proof_text thms =
     (*val find_result = find st*)
     val initial_log = original_log ^ original_score_msg
   in
-    if original_score < 4.5 then
+    if original_score < 0.0 (*Disabled for testing... 4.5*) then
       GoodEnoughUnderCutoff (initial_log ^ "\n\n")
     else
       case find st thms of
