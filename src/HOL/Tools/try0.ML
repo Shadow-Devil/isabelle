@@ -192,7 +192,6 @@ val _ =
   Outer_Syntax.command \<^command_keyword>\<open>try0\<close> "try a combination of proof methods"
     (Scan.optional parse_attrs ([], [], [], []) #>> try0_trans);
 
-
 val _ =
   Try.tool_setup
    {name = "try0", weight = 30, auto_option = \<^system_option>\<open>auto_methods\<close>,
