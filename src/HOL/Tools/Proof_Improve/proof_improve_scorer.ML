@@ -124,8 +124,6 @@ fun count_applys proof_text =
   in
     apply_count
   end;
-(*TODO: fix parsing*)
-val test = count_applys "apply(simp)" |> Int.toString |> writeln
 
 fun log_normalize (value: real, max_value: real) : real =
   if value <= 0.0 then 0.0
@@ -139,7 +137,8 @@ fun log_normalize (value: real, max_value: real) : real =
     end
 
 fun linear_normalize (value: real, max_value: real) : real =
-  if value <= 0.0 orelse max_value <= 0.0 then 0.0
+  if value <= 0.0 then 0.0
+  else if max_value <= 0.0 then 0.0
   else
     let
       val result = 100.0 * (value /  max_value)

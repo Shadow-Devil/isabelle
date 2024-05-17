@@ -12,7 +12,7 @@ end;
 structure Proof_Improve_Finder: PROOF_IMPROVE_FINDER =
 struct
 
-fun parse_sledgehammer_result (result: string) : string =
+fun parse_try0_result (result: string) : string =
   let
     val prefix = "Auto Try0 found a proof: "
     (*val prefix = "Try this: "*)
@@ -43,14 +43,40 @@ in
   result_trimmed
 end;
 
+fun parse_sledgehammer_result (result: string) : string =
+  let
+    val prefix = "Try this: "
+    val prefix_len = size prefix
+
+    val result_without_prefix =
+      if String.isPrefix prefix result then
+        String.extract (result, prefix_len, NONE)
+      else
+        result
+
+    fun rindex_from (s: string, c: char, i: int) =
+      if i < 0 then NONE
+      else if String.sub (s, i) = c then SOME i
+      else rindex_from (s, c, i - 1)
+
+    val result_without_timing =
+      case rindex_from (result_without_prefix, #"(", size result_without_prefix - 1) of
+        NONE => result_without_prefix
+      | SOME i => String.substring (result_without_prefix, 0, i)
+
+  val result_trimmed =
+    if String.isSuffix (result_without_timing) " " then
+      String.substring (result_without_timing, 0, size result_without_timing - 1)
+    else
+      result_without_timing
+in
+  result_trimmed
+end;
+
 
 fun find (st: Proof.state) thms =
   let
-(* 
-Try0.try0 : Time.time option -> string list * string list * string list * string list -> Proof.state -> bool 
-Try0.try0 None (simp, intro, elim, del) st
-*)
-    val params = Sledgehammer_Commands.default_params \<^theory> []
+  (*  val params = Sledgehammer_Commands.default_params \<^theory> []
     val four_seconds = Time.fromSeconds 4
 
     val timeout_params = {
@@ -84,9 +110,8 @@ Try0.try0 None (simp, intro, elim, del) st
       expect = #expect params
     }  
 
-    (* TODO: fill this add array and enable only *)
     val fact_override = {add = map (fn thm => (Facts.named thm, [])) thms, del = [], only = true}
-    (*val (_, (outcome, try_this)) =  Sledgehammer.run_sledgehammer timeout_params
+    val (_, (outcome, try_this)) =  Sledgehammer.run_sledgehammer timeout_params
       Sledgehammer_Prover.Normal NONE 1 fact_override st
   in
     case outcome of
@@ -106,10 +131,11 @@ Try0.try0 None (simp, intro, elim, del) st
     | _ => NONE
   end
 *)
-  val (successful, (name, [message])) = Try0.generic_try0 Try0.Auto_Try NONE (thms, [], [], []) st
+    (* TODO: Bind exception? *)
+    val (successful, (name, [message])) = Try0.generic_try0 Try0.Auto_Try NONE (thms, [], [], []) st
   in
     if successful then
-      SOME (length thms, parse_sledgehammer_result message)
+      SOME (length thms, parse_try0_result message)
     else NONE
 end
 end;

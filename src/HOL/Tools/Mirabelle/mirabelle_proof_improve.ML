@@ -37,7 +37,7 @@ fun get_content spans : string =
     concat_tokens (non_comment_tokens, "")
   end;
 
-fun get_thms (st: Proof.state) (st': Toplevel.state) thy: (string * thm list) list =
+fun get_thms (st: Proof.state) (st': Toplevel.state): (string * thm list) list =
   let
     val get_facts: Toplevel.state -> Facts.T  = Proof_Context.facts_of o Proof.context_of o Toplevel.proof_of
     val facts = (Proof_Context.facts_of o Proof.context_of) st
@@ -46,12 +46,13 @@ fun get_thms (st: Proof.state) (st': Toplevel.state) thy: (string * thm list) li
         ([facts], get_facts st')
       else
         let
+          val ctxt = Toplevel.context_of st';
           val prev_thys =
             (case Toplevel.previous_theory_of st' of
               SOME thy => [thy]
-            | NONE => Theory.parents_of thy);
+            | NONE => Theory.parents_of (Proof_Context.theory_of ctxt));
           val factss = map Global_Theory.facts_of prev_thys
-          val facts' = Global_Theory.facts_of thy
+          val facts' = Global_Theory.facts_of (Proof_Context.theory_of ctxt)
         in (factss, facts') end)
     in (Facts.dest_static false factss facts') end;
 
@@ -61,33 +62,30 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
 
     fun run ({pre, spans, pos, post, ...} : Mirabelle.command) : string =
       let
-        (*See also: mirabelle_metis.ML *)
+        (* See also: mirabelle_metis.ML *)
         val ctxt = Toplevel.context_of post
         val thy = Proof_Context.theory_of ctxt
         val simps = ctxt |> Raw_Simplifier.simpset_of |> Raw_Simplifier.dest_simps
 
-        val current_thms = get_thms pre post thy |> maps snd
-        val current_thm_name = @{make_string} current_thms
+        val current_thms = get_thms pre post
 
-        val deps = map (fn x => x |> snd |> fst) (Thm_Deps.thm_deps thy current_thms)
+        val deps = map (fn x => x |> snd |> fst) (Thm_Deps.thm_deps thy (current_thms |> maps snd))
 
         val filtered_deps = deps |> filter (fn used_thm => 
           let
-            val used_thms_simps = Global_Theory.get_thms @{theory} used_thm |> maps (Raw_Simplifier.mksimps ctxt);
-          in
-            (* if for all used thm simplifications there is a simplification in the simpset then it should remove it (since it is unnecessary) *)
-            used_thms_simps |> forall (fn x => simps |> exists (fn y => Thm.eq_thm_prop (x, y))) |> not
-          end);
+            val used_thms_simps = Global_Theory.get_thms thy used_thm |> maps (Raw_Simplifier.mksimps ctxt);
 
+            (* if for all used thm simplifications there is a simplification in the simpset then it should remove it (since it is unnecessary) *)
+            val is_simp_rule = used_thms_simps |> forall (fn x => simps |> exists (fn y => Thm.eq_thm_prop (x, y)))
+
+            (* TODO Filter inaccessible facts *)
+            val is_accessable = Facts.lookup (Context.Theory thy) (Global_Theory.facts_of thy) used_thm |> Option.isSome
+          in
+            not is_simp_rule andalso is_accessable
+          end)
         val thms = Mirabelle.theorems_of_sucessful_proof post
         val thms_names = map Thm.derivation_name thms
 
-        
-
-        (* todo: why empty?
-        val facts = map #1 (Facts.props (Proof_Context.facts_of (Proof.context_of pre)));
-        val facts_names = map Thm.get_name_hint facts;
-        *)
         val proof_text = get_content spans
         val outcome =
           if proof_text = "" then
@@ -104,9 +102,9 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
       in
         Synchronized.change data (fn _ => updated_data);
         "Outcome: " ^ string_of_outcome outcome ^ "\n" ^
-        "Thms: " ^ (String.concatWith " " thms_names) ^ "\n" ^
-        "Current Thm: " ^ current_thm_name ^ "\n" ^
-        "Filtered: " ^ (String.concatWith " " filtered_deps) ^ "\n"
+        "Thms (via Mirabelle function): " ^ @{make_string} thms_names ^ "\n" ^
+        "Current Thm: " ^ @{make_string} current_thms ^ "\n" ^
+        "Filtered dependencies: " ^ @{make_string} filtered_deps ^ "\n"
       end
 
     fun finalize () : string = to_string (Synchronized.value data)
