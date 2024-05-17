@@ -131,11 +131,10 @@ fun find (st: Proof.state) thms =
     | _ => NONE
   end
 *)
-    (* TODO: Bind exception? *)
-    val (successful, (name, [message])) = Try0.generic_try0 Try0.Auto_Try NONE (thms, [], [], []) st
+    val (successful, (name, messages)) = Try0.generic_try0 Try0.Auto_Try NONE (thms, [], [], []) st
   in
     if successful then
-      SOME (length thms, parse_try0_result message)
+      SOME (length thms, parse_try0_result (the_single messages))
     else NONE
 end
 end;
