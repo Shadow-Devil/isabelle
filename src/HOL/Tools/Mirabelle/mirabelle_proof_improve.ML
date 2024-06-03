@@ -63,9 +63,10 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
     fun run ({pre, spans, pos, post, ...} : Mirabelle.command) : string =
       let
         (* See also: mirabelle_metis.ML *)
-        val ctxt = Toplevel.context_of post
-        val thy = Proof_Context.theory_of ctxt
-        val simps = ctxt |> Raw_Simplifier.simpset_of |> Raw_Simplifier.dest_simps
+        val ctxt = Toplevel.context_of post;
+        val thy = Proof_Context.theory_of ctxt;
+        val simps = ctxt |> Raw_Simplifier.simpset_of |> Raw_Simplifier.dest_simps;
+        val facts = Global_Theory.facts_of thy;
 
         val current_thms = get_thms pre post
 
@@ -78,10 +79,10 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
             (* if for all used thm simplifications there is a simplification in the simpset then it should remove it (since it is unnecessary) *)
             val is_simp_rule = used_thms_simps |> forall (fn x => simps |> exists (fn y => Thm.eq_thm_prop (x, y)))
 
-            (* TODO Filter inaccessible facts *)
-            val is_accessable = Facts.lookup (Context.Theory thy) (Global_Theory.facts_of thy) used_thm |> Option.isSome
+            val exists_in_facts_table = Facts.lookup (Context.Theory thy) (Global_Theory.facts_of thy) used_thm |> Option.isSome
+            val is_hidden = Name_Space.extern ctxt (Facts.space_of facts) used_thm |> Long_Name.is_hidden;
           in
-            not is_simp_rule andalso is_accessable
+            not is_simp_rule andalso exists_in_facts_table andalso not is_hidden
           end)
         val thms = Mirabelle.theorems_of_sucessful_proof post
         val thms_names = map Thm.derivation_name thms
