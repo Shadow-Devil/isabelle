@@ -11,7 +11,7 @@ sig
                     | NoAlternativeFound of string
                     | GoodEnoughUnderCutoff of string
 
-  val proof_improve : Proof.state -> string -> string list -> outcome
+  val proof_improve : Proof.state -> string -> Try0.try0_params -> outcome
   val string_of_outcome : outcome -> string
 end;
 
@@ -35,7 +35,7 @@ fun string_of_outcome outcome =
     | GoodEnoughUnderCutoff log => "Good Enough; The Score is under the Cutoff\n" ^ log
 
 
-fun proof_improve st proof_text thms =
+fun proof_improve st proof_text try0_params =
   let
     val (original_score, original_log) = score
       (List.length (Proof.the_fact_or_facts st)) proof_text
@@ -46,7 +46,7 @@ fun proof_improve st proof_text thms =
     if original_score < 0.0 (*Disabled for testing... 4.5*) then
       GoodEnoughUnderCutoff (initial_log ^ "\n\n")
     else
-      case find st thms of
+      case find st try0_params of
         NONE =>
           let
             val log_msg = initial_log ^ "\nNo potential rewrite found."

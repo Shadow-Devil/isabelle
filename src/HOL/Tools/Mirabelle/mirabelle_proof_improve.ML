@@ -65,34 +65,94 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
         (* See also: mirabelle_metis.ML *)
         val ctxt = Toplevel.context_of post;
         val thy = Proof_Context.theory_of ctxt;
-        val simps = ctxt |> Raw_Simplifier.simpset_of |> Raw_Simplifier.dest_simps;
         val facts = Global_Theory.facts_of thy;
+        val ctxt_suppressed_warnings = Context_Position.set_visible false ctxt;
+        val simps = ctxt |> Raw_Simplifier.simpset_of |> Raw_Simplifier.dest_simps;
 
-        val current_thms = get_thms pre post
+        val claset = Classical.get_cs (Context.Proof @{context}) |> Classical.rep_cs;
 
-        val deps = map (fn x => x |> snd |> fst) (Thm_Deps.thm_deps thy (current_thms |> maps snd))
+        fun claset_member net xs = exists (fn x => Item_Net.member net (x, (x, []), (x, []))) xs;
+        
+        fun is_standard_SIs xs = claset_member (claset |> #safeIs) xs;
+        fun is_standard_Is xs = claset_member (claset |> #unsafeIs) xs;
+        fun is_standard_SEs xs = claset_member (claset |> #safeEs) xs;
+        fun is_standard_Es xs = claset_member (claset |> #unsafeEs) xs;
+        fun is_standard_SDs xs = xs 
+          |> filter (fn x => not (has_fewer_prems 1 x)) 
+          |> map Tactic.make_elim
+          |> (claset_member (claset |> #safeEs));
+        fun is_standard_Ds xs =xs 
+          |> filter (fn x => not (has_fewer_prems 1 x))
+          |> map Tactic.make_elim
+          |> claset_member (claset |> #unsafeEs);
 
-        val filtered_deps = deps |> filter (fn used_thm => 
+        val thms = get_thms pre post |> maps snd
+
+        (* if for all used thm simplifications there is a simplification in the simpset
+           then it should remove it (since it is unnecessary) *)
+        fun is_simp thm_deps_as_simps = thm_deps_as_simps |> forall (fn x => simps |> exists (fn y => Thm.eq_thm_prop (x, y)));
+        fun exists_in_facts_table name = Facts.lookup (Context.Theory thy) (Global_Theory.facts_of thy) name |> Option.isSome
+        fun is_hidden name = Name_Space.extern ctxt (Facts.space_of facts) name |> Long_Name.is_hidden;
+        fun is_protect name = (name = "Pure.protectI" orelse name = "Pure.protectD")
+
+        val thm_deps = Thm_Deps.thm_deps thy thms |> map (fn x => x |> snd |> fst)
+                        |> filter (fn name => exists_in_facts_table name andalso not (is_hidden name) andalso not (is_protect name))
+                        |> map (fn name => (name, Global_Theory.get_thms thy name));
+
+        val thm_deps_without_standard_simps = thm_deps |> filter (fn (_, thm_deps)  => 
           let
-            val used_thms_simps = Global_Theory.get_thms thy used_thm |> maps (Raw_Simplifier.mksimps ctxt);
-
-            (* if for all used thm simplifications there is a simplification in the simpset then it should remove it (since it is unnecessary) *)
-            val is_simp_rule = used_thms_simps |> forall (fn x => simps |> exists (fn y => Thm.eq_thm_prop (x, y)))
-
-            val exists_in_facts_table = Facts.lookup (Context.Theory thy) (Global_Theory.facts_of thy) used_thm |> Option.isSome
-            val is_hidden = Name_Space.extern ctxt (Facts.space_of facts) used_thm |> Long_Name.is_hidden;
+            val thm_deps_as_simps = thm_deps |> maps (Raw_Simplifier.mksimps ctxt);
           in
-            not is_simp_rule andalso exists_in_facts_table andalso not is_hidden
-          end)
-        val thms = Mirabelle.theorems_of_sucessful_proof post
-        val thms_names = map Thm.derivation_name thms
+            not (is_simp thm_deps_as_simps)
+        end);
+        fun is_intro (name, used_thms) = 
+            String.isSuffix "I" name andalso 
+            not (is_standard_SIs used_thms) andalso 
+            not (is_standard_Is used_thms) andalso
+            can (fn x => Classical.addIs (ctxt_suppressed_warnings, x)) used_thms;
+
+        fun is_elim (name, used_thms) = 
+            String.isSuffix "E" name andalso 
+            not (is_standard_SEs used_thms) andalso 
+            not (is_standard_Es used_thms) andalso
+            can (fn x => Classical.addEs (ctxt_suppressed_warnings, x)) used_thms;
+
+        fun is_dest (name, used_thms) = 
+          String.isSuffix "D" name andalso 
+          not (is_standard_SDs used_thms) andalso 
+          not (is_standard_Ds used_thms) andalso
+          can (fn x => Classical.addDs (ctxt_suppressed_warnings, x)) used_thms;
+
+
+        val intros = thm_deps_without_standard_simps |> filter is_intro;
+        val elims = thm_deps_without_standard_simps |> filter is_elim;
+        val dest = thm_deps_without_standard_simps |> filter is_dest;
+
+        val thm_deps_without_intro_elim_dest = thm_deps_without_standard_simps |> filter (fn (name1, used_thms) =>
+          intros |> forall (fn (name2, _) => name1 <> name2) andalso
+          elims |> forall (fn (name2, _) => name1 <> name2) andalso
+          dest |> forall (fn (name2, _) => name1 <> name2) andalso 
+          not (is_standard_SIs used_thms) andalso 
+          not (is_standard_Is used_thms) andalso
+          not (is_standard_SEs used_thms) andalso 
+          not (is_standard_Es used_thms) andalso
+          not (is_standard_SDs used_thms) andalso 
+          not (is_standard_Ds used_thms)
+        );
+        val thms_names = Mirabelle.theorems_of_sucessful_proof post |>
+                          map Thm.derivation_name;
 
         val proof_text = get_content spans
         val outcome =
           if proof_text = "" then
             Unknown "segment could not be matched\n"
           else
-            Timeout.apply generous_timeout proof_improve pre proof_text filtered_deps
+            Timeout.apply generous_timeout proof_improve pre proof_text {
+              simp = thm_deps_without_intro_elim_dest |> map #1,
+              intro = intros |> map #1,
+              elim = elims |> map #1,
+              dest = dest |> map #1
+            }
         val current_data = Synchronized.value data
         val updated_data =
           case outcome of
@@ -104,8 +164,8 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
         Synchronized.change data (fn _ => updated_data);
         "Outcome: " ^ string_of_outcome outcome ^ "\n" ^
         "Thms (via Mirabelle function): " ^ @{make_string} thms_names ^ "\n" ^
-        "Current Thm: " ^ @{make_string} current_thms ^ "\n" ^
-        "Filtered dependencies: " ^ @{make_string} filtered_deps ^ "\n"
+        "Current Thm: " ^ @{make_string} thms ^ "\n" ^
+        "Filtered dependencies: " ^ @{make_string} (thm_deps |> map #1) ^ "\n"
       end
 
     fun finalize () : string = to_string (Synchronized.value data)

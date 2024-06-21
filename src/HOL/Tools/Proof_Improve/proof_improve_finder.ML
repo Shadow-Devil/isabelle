@@ -6,7 +6,7 @@ Finding proof alternatives using Sledgehammer.
 
 signature PROOF_IMPROVE_FINDER =
 sig
-  val find: Proof.state -> string list -> (int * string) option
+  val find: Proof.state -> Try0.try0_params -> (int * string) option
 end;
 
 structure Proof_Improve_Finder: PROOF_IMPROVE_FINDER =
@@ -74,7 +74,7 @@ in
 end;
 
 
-fun find (st: Proof.state) thms =
+fun find (st: Proof.state) try0_params =
   let
   (*  val params = Sledgehammer_Commands.default_params \<^theory> []
     val four_seconds = Time.fromSeconds 4
@@ -131,10 +131,12 @@ fun find (st: Proof.state) thms =
     | _ => NONE
   end
 *)
-    val (successful, (name, messages)) = Try0.generic_try0 Try0.Auto_Try NONE (thms, [], [], []) st
+    val (successful, (name, messages)) = Try0.generic_try0 Try0.Auto_Try NONE try0_params st
   in
     if successful then
-      SOME (length thms, parse_try0_result (the_single messages))
+      SOME (length (#simp try0_params) + length (#intro try0_params) + 
+            length (#elim try0_params) + length (#dest try0_params), 
+            parse_try0_result (the_single messages))
     else NONE
 end
 end;
