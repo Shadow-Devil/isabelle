@@ -56,6 +56,9 @@ fun get_thms (st: Proof.state) (st': Toplevel.state): (string * thm list) list =
         in (factss, facts') end)
     in (Facts.dest_static false factss facts') end;
 
+fun all_xs_not_in_ys (xs: thm list) (ys: thm list) =
+  null (inter (fn (x, y) => Thm.eq_thm_prop (x, y)) xs ys);
+
 fun make_action ({timeout, ...} : Mirabelle.action_context) =
   let
     val generous_timeout = Time.scale 1000.0 timeout
@@ -90,7 +93,7 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
 
         (* if for all used thm simplifications there is a simplification in the simpset
            then it should remove it (since it is unnecessary) *)
-        fun is_simp thm_deps_as_simps = thm_deps_as_simps |> forall (fn x => simps |> exists (fn y => Thm.eq_thm_prop (x, y)));
+        fun is_simp xs = not (all_xs_not_in_ys xs simps);
         fun exists_in_facts_table name = Facts.lookup (Context.Theory thy) (Global_Theory.facts_of thy) name |> Option.isSome
         fun is_hidden name = Name_Space.extern ctxt (Facts.space_of facts) name |> Long_Name.is_hidden;
         fun is_protect name = (name = "Pure.protectI" orelse name = "Pure.protectD")
@@ -101,9 +104,10 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
 
         val thm_deps_without_standard_simps = thm_deps |> filter (fn (_, thm_deps)  => 
           let
+            (* this can be empty which will also filter it out *)
             val thm_deps_as_simps = thm_deps |> maps (Raw_Simplifier.mksimps ctxt);
           in
-            not (is_simp thm_deps_as_simps)
+            not (null thm_deps_as_simps) andalso not (is_simp thm_deps_as_simps)
         end);
         fun is_intro (name, used_thms) = 
             String.isSuffix "I" name andalso 
@@ -128,16 +132,16 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
         val elims = thm_deps_without_standard_simps |> filter is_elim;
         val dest = thm_deps_without_standard_simps |> filter is_dest;
 
-        val thm_deps_without_intro_elim_dest = thm_deps_without_standard_simps |> filter (fn (name1, used_thms) =>
-          intros |> forall (fn (name2, _) => name1 <> name2) andalso
-          elims |> forall (fn (name2, _) => name1 <> name2) andalso
-          dest |> forall (fn (name2, _) => name1 <> name2) andalso 
-          not (is_standard_SIs used_thms) andalso 
-          not (is_standard_Is used_thms) andalso
-          not (is_standard_SEs used_thms) andalso 
-          not (is_standard_Es used_thms) andalso
-          not (is_standard_SDs used_thms) andalso 
-          not (is_standard_Ds used_thms)
+        val thm_deps_without_intro_elim_dest = thm_deps_without_standard_simps |> filter (fn (_, simp_thms) =>
+          all_xs_not_in_ys simp_thms (intros |> maps #2) andalso
+          all_xs_not_in_ys simp_thms (elims |> maps #2) andalso
+          all_xs_not_in_ys simp_thms (dest |> maps #2) andalso
+          not (is_standard_SIs simp_thms) andalso 
+          not (is_standard_Is simp_thms) andalso
+          not (is_standard_SEs simp_thms) andalso 
+          not (is_standard_Es simp_thms) andalso
+          not (is_standard_SDs simp_thms) andalso 
+          not (is_standard_Ds simp_thms)
         );
         val thms_names = Mirabelle.theorems_of_sucessful_proof post |>
                           map Thm.derivation_name;
