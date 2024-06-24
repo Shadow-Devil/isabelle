@@ -131,7 +131,7 @@ fun find (st: Proof.state) try0_params =
     | _ => NONE
   end
 *)
-    val (successful, (name, messages)) = Try0.generic_try0 Try0.Auto_Try NONE try0_params st
+    val (successful, (name, messages)) = Try0.generic_try0 Try0.Auto_Try (SOME (seconds 5.0)) try0_params st
   in
     if successful then
       SOME (length (#simp try0_params) + length (#intro try0_params) + 
