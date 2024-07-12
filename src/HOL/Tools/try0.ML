@@ -16,7 +16,7 @@ sig
   val silence_methods : bool -> Proof.context -> Proof.context
   val try0 : Time.time option -> string list * string list * string list * string list ->
     Proof.state -> bool
-  datatype mode = Auto_Try | Try | Normal;
+  datatype mode = Auto_Try | Try | Normal | Non_Interactive;
   val generic_try0 : mode -> Time.time option -> try0_params
     -> Proof.state -> bool * (string * string list)
 end;
@@ -39,7 +39,7 @@ val empty_params = {
 
 val noneN = "none";
 
-datatype mode = Auto_Try | Try | Normal;
+datatype mode = Auto_Try | Try | Normal | Non_Interactive;
 
 val default_timeout = seconds 5.0;
 
@@ -59,11 +59,10 @@ fun apply_generic timeout_opt name all_goals command pre post apply st =
         if length new_goals = length previous_goals then NONE
         else if length new_goals = 0 then
           SOME (name, command, Time.toMilliseconds (Time.now () - time_start), true)
-        else 
-          SOME (name, command 
-(*^ (if all_goals then 
-           previous_goals |> find_index (fn (t1) => exists (fn t2 => t2 <> t1) new_goals) |> (fn x => x + 1) |> Int.toString |> enclose "[" "]"
-           else "")*), Time.toMilliseconds (Time.now () - time_start), false)
+        else if length new_goals < length previous_goals andalso not all_goals then
+          SOME (name, command, Time.toMilliseconds (Time.now () - time_start), false)
+        else
+          NONE
        | NONE => NONE
   end;
 
@@ -178,15 +177,17 @@ fun generic_try0 mode timeout_opt (params: try0_params) st =
           (case mode of
              Auto_Try => "Auto Try0 found a proof"
            | Try => "Try0 found a proof"
-           | Normal => "Try this") ^ ": " ^
-          Active.sendback_markup_command
-              ((if done then "by"
-                else "apply") ^ " " ^ command) ^
-          (case xs of
-            [(_, ms)] => " (" ^ time_string ms ^ ")"
+           | Normal => "Try this"
+           | Non_Interactive => "Try this") ^ ": " ^ 
+              Active.sendback_markup_command ((if done then "by" else "apply") ^ " " ^ command) ^
+              (case xs of
+                [(_, ms)] => " (" ^ time_string ms ^ ")"
           | xs => "\n(" ^ space_implode "; " (map tool_time_string xs) ^ ")");
       in
-        (true, (name, if mode = Auto_Try then [message] else (writeln message; [])))
+        (true, (name, 
+                if mode = Auto_Try orelse mode = Non_Interactive 
+                then [message]
+                else (writeln message; [])))
       end)
   end;
 
