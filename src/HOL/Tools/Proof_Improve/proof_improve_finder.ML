@@ -1,12 +1,12 @@
 (*  Title:      HOL/Tools/Proof_Improve/proof_improve_finder.ML
     Author:     Daniel Lipkin, TU Muenchen
 
-Finding proof alternatives using Sledgehammer.
+Finding proof alternatives using Sledgehammer and try0.
 *)
 
 signature PROOF_IMPROVE_FINDER =
 sig
-  val find: Proof.state -> Try0.try0_params -> (int * string) option
+  val find: Proof.state -> Proof_Improve_Dependency_Analyser.outcome -> (int * string * string) option
 end;
 
 structure Proof_Improve_Finder: PROOF_IMPROVE_FINDER =
@@ -14,8 +14,7 @@ struct
 
 fun parse_try0_result (result: string) : string =
   let
-    val prefix = "Auto Try0 found a proof: "
-    (*val prefix = "Try this: "*)
+    val prefix = "Try this: "
     val prefix_len = size prefix
 
     val result_without_prefix =
@@ -73,13 +72,59 @@ in
   result_trimmed
 end;
 
+fun subsets []: 'a list list = [[]]
+  | subsets (x::xs) =
+      let
+        val rest_subsets = subsets xs
+      in
+         rest_subsets @ (map (fn subset => subset @ [x]) rest_subsets)
+      end;
 
-fun find (st: Proof.state) try0_params =
+(* Cartesian product of a list of lists *)
+fun cartesian_product (xss: 'a list list): 'a list list = 
+let 
+  fun helper (xs: 'a list) (acc: 'a list list) = acc |> maps (fn a => 
+       (map (fn x => a @ [x]) xs));
+in
+  fold helper xss [[]]
+end;
+
+fun proof_search (st: Proof.state) ({simp, intro, elim, dest} : Try0.try0_params) timeout =
   let
-  (*  val params = Sledgehammer_Commands.default_params \<^theory> []
+    val simp_sets = if length simp < 30 then subsets (rev simp) else [[], simp];
+    val intro_sets = if length intro < 30 then subsets (rev intro) else [[], intro];
+    val elim_sets = if length elim < 30 then subsets (rev elim) else [[], elim];
+    val dest_sets = if length dest < 30 then subsets (rev dest) else [[], dest];
+    fun apply_try0 [simp_set, intro_set, elim_set, dest_set] = 
+    let
+      val _ = writeln ("try0 (" ^ 
+        "simp: " ^ space_implode " " (simp_set) ^ 
+        " intro: " ^ space_implode " " (intro_set) ^ 
+        " elim: " ^ space_implode " " (elim_set) ^ 
+        " dest: " ^ space_implode " " (dest_set) ^ ")");
+    in
+      case Try0.generic_try0 Try0.Non_Interactive (SOME timeout) {
+        simp = simp_set, 
+        intro = intro_set,
+        elim = elim_set,
+        dest = dest_set
+      } st of
+        (true, result) => SOME (result, {simp = simp_set, intro = intro_set, elim = elim_set, dest = dest_set}) |
+        _ => NONE
+    end |
+      apply_try0 _ = NONE
+    
+  in
+    cartesian_product [simp_sets, intro_sets, elim_sets, dest_sets] |> get_first apply_try0
+end;
+
+
+fun find (st: Proof.state) {all_dependencies, classified} =
+  let
+    val params = Sledgehammer_Commands.default_params \<^theory> []
     val four_seconds = Time.fromSeconds 4
 
-    val timeout_params = {
+    val sledgehammer_timeout_params = {
       debug = #debug params,
       verbose = #verbose params,
       overlord = #overlord params,
@@ -110,8 +155,8 @@ fun find (st: Proof.state) try0_params =
       expect = #expect params
     }  
 
-    val fact_override = {add = map (fn thm => (Facts.named thm, [])) thms, del = [], only = true}
-    val (_, (outcome, try_this)) =  Sledgehammer.run_sledgehammer timeout_params
+    val fact_override = {add = map (fn thm => (Facts.named thm, [])) all_dependencies, del = [], only = true}
+    val (_, (outcome, try_this)) =  Sledgehammer.run_sledgehammer sledgehammer_timeout_params
       Sledgehammer_Prover.Normal NONE 1 fact_override st
   in
     case outcome of
@@ -125,18 +170,14 @@ fun find (st: Proof.state) try0_params =
              if String.isSubstring "failed" result orelse String.isSubstring "apply" result then
                NONE
              else
-               SOME (List.length facts, result)
+               SOME (List.length facts, "Sledgehammer", result)
            end
          | SOME _ => NONE)
-    | _ => NONE
+    | _ => 
+      case proof_search st classified four_seconds of
+        SOME ((name, messages), {simp, intro, elim, dest}) =>
+          SOME (length simp + length intro + length elim + length dest, 
+                "Try0: " ^ name,  parse_try0_result (the_single messages))
+        | NONE => NONE
   end
-*)
-    val (successful, (name, messages)) = Try0.generic_try0 Try0.Auto_Try (SOME (seconds 5.0)) try0_params st
-  in
-    if successful then
-      SOME (length (#simp try0_params) + length (#intro try0_params) + 
-            length (#elim try0_params) + length (#dest try0_params), 
-            parse_try0_result (the_single messages))
-    else NONE
-end
 end;

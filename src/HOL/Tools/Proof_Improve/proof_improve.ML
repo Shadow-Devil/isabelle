@@ -11,7 +11,8 @@ sig
                     | NoAlternativeFound of string
                     | GoodEnoughUnderCutoff of string
 
-  val proof_improve : Proof.state -> string -> Try0.try0_params -> outcome
+  val proof_improve : Proof.state -> string -> thm list -> Proof.context -> 
+                      Proof_Improve_Dependency_Analyser.outcome -> outcome
   val string_of_outcome : outcome -> string
 end;
 
@@ -35,28 +36,31 @@ fun string_of_outcome outcome =
     | GoodEnoughUnderCutoff log => "Good Enough; The Score is under the Cutoff\n" ^ log
 
 
-fun proof_improve st proof_text try0_params =
+fun proof_improve st proof_text thms ctxt thm_deps =
   let
+  (*TODO: use st or proof_st? st = pre, proof_st = remove_schematics (the_single thms) *)
+    val proof_st = ctxt |> Proof.theorem NONE (K I) [[(Thm.prop_of (Misc_Legacy.freeze_thaw_robust ctxt (the_single thms) |> #1), [])]];
+
     val (original_score, original_log) = score
       (List.length (Proof.the_fact_or_facts st)) proof_text
     val original_score_msg = "Scorer result (original): " ^ Real.toString original_score
-    (*val find_result = find st*)
     val initial_log = original_log ^ original_score_msg
   in
     if original_score < 0.0 (*Disabled for testing... 4.5*) then
       GoodEnoughUnderCutoff (initial_log ^ "\n\n")
     else
-      case find st try0_params of
+      case find proof_st thm_deps of
         NONE =>
           let
             val log_msg = initial_log ^ "\nNo potential rewrite found."
           in
             NoAlternativeFound (log_msg ^ "\n\n")
           end
-      | SOME (found_facts, found_proof_text) =>
+      | SOME (found_facts, found_by, found_proof_text) =>
         let
           val (found_score, found_log) = score found_facts found_proof_text
-          val found_score_msg = "Scorer result (found): " ^ Real.toString found_score ^" \n"
+          val found_score_msg = "Scorer result (found): " ^ Real.toString found_score ^" \n" ^ 
+                                "Found by: " ^ found_by ^ "\n"
           val combined_log = initial_log ^ "\n" ^ found_log ^ found_score_msg
         in
           if found_score < original_score then
