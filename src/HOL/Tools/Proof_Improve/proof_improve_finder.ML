@@ -91,10 +91,10 @@ end;
 
 fun proof_search (st: Proof.state) ({simp, intro, elim, dest} : Try0.try0_params) timeout =
   let
-    val simp_sets = if length simp < 30 then subsets (rev simp) else [[], simp];
-    val intro_sets = if length intro < 30 then subsets (rev intro) else [[], intro];
-    val elim_sets = if length elim < 30 then subsets (rev elim) else [[], elim];
-    val dest_sets = if length dest < 30 then subsets (rev dest) else [[], dest];
+    val simp_sets = if length simp < 10 then subsets (rev simp) else [[], simp];
+    val intro_sets = if length intro < 10 then subsets (rev intro) else [[], intro];
+    val elim_sets = if length elim < 10 then subsets (rev elim) else [[], elim];
+    val dest_sets = if length dest < 10 then subsets (rev dest) else [[], dest];
     fun apply_try0 [simp_set, intro_set, elim_set, dest_set] = 
     let
       val _ = writeln ("try0 (" ^ 
@@ -109,8 +109,14 @@ fun proof_search (st: Proof.state) ({simp, intro, elim, dest} : Try0.try0_params
         elim = elim_set,
         dest = dest_set
       } st of
-        (true, result) => SOME (result, {simp = simp_set, intro = intro_set, elim = elim_set, dest = dest_set}) |
-        _ => NONE
+        (true, (name, [message])) => 
+          let 
+            val parsed_message = parse_try0_result message;
+          in 
+            if String.isSubstring "apply" parsed_message then NONE else
+            SOME ((name, parsed_message), {simp = simp_set, intro = intro_set, elim = elim_set, dest = dest_set})
+          end 
+      | _ => NONE
     end |
       apply_try0 _ = NONE
     
@@ -170,14 +176,14 @@ fun find (st: Proof.state) {all_dependencies, classified} =
              if String.isSubstring "failed" result orelse String.isSubstring "apply" result then
                NONE
              else
-               SOME (List.length facts, "Sledgehammer", result)
+               SOME (0(*List.length facts*), "Sledgehammer", result)
            end
          | SOME _ => NONE)
     | _ => 
       case proof_search st classified four_seconds of
-        SOME ((name, messages), {simp, intro, elim, dest}) =>
-          SOME (length simp + length intro + length elim + length dest, 
-                "Try0: " ^ name,  parse_try0_result (the_single messages))
+        SOME ((name, message), {simp, intro, elim, dest}) =>
+          SOME (0 (*length simp + length intro + length elim + length dest*), 
+                "Try0: " ^ name, message)
         | NONE => NONE
   end
 end;

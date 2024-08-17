@@ -38,8 +38,9 @@ fun string_of_outcome outcome =
 
 fun proof_improve st proof_text thms ctxt thm_deps =
   let
-  (*TODO: use st or proof_st? st = pre, proof_st = remove_schematics (the_single thms) *)
-    val proof_st = ctxt |> Proof.theorem NONE (K I) [[(Thm.prop_of (Misc_Legacy.freeze_thaw_robust ctxt (the_single thms) |> #1), [])]];
+    val is_declared_as_simp = Proof_Improve_Dependency_Analyser.is_standard_simp ctxt thms;
+    val ctxt' = if is_declared_as_simp then Raw_Simplifier.delsimps (ctxt, thms) else ctxt;
+    val proof_st = ctxt' |> Proof.theorem NONE (K I) [thms |> map (fn thm => (Thm.prop_of (Misc_Legacy.freeze_thaw_robust ctxt thm |> #1), []))];
 
     val (original_score, original_log) = score
       (List.length (Proof.the_fact_or_facts st)) proof_text

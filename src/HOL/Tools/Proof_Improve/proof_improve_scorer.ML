@@ -228,3 +228,7 @@ fun score facts proof_text =
 fun score_state st proof_text = score (List.length (Proof.the_facts st)) proof_text
 fun score_thm thms proof_text = score (List.length thms) proof_text
 end;
+val x = Proof_Improve_Scorer.score 0 "by (simp add : makeCF_def makeAF_def abstFn_def cfRead_def \n    split : bool.splits option.splits )"
+  |> #1 |> @{make_string} |> writeln;
+val y = Proof_Improve_Scorer.score 4 "by (simp add: abstFn_def cfRead_def makeCF_def makeAF_def) "
+  |> #1 |> @{make_string} |> writeln;

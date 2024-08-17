@@ -7,7 +7,7 @@ signature PROOF_IMPROVE_DEPENDENCY_ANALYSER =
 sig
   type outcome = {all_dependencies: string list, classified: Try0.try0_params}
   val analyse_dependencies : Proof.context -> thm list -> outcome
-
+  val is_standard_simp : Proof.context -> thm list -> bool;
 end;
 
 structure Proof_Improve_Dependency_Analyser: PROOF_IMPROVE_DEPENDENCY_ANALYSER =
@@ -55,33 +55,45 @@ fun is_standard_Ds xs claset = xs
   |> map Tactic.make_elim
   |> claset_member (claset |> #unsafeEs);
 
+fun is_standard_simp ctxt thms = let
+  val simps = ctxt |> Raw_Simplifier.simpset_of |> Raw_Simplifier.dest_simps;
+  val thms_as_simps = thms |> maps (Raw_Simplifier.mksimps ctxt);
+in
+  not (null thms_as_simps) andalso not (all_xs_not_in_ys thms_as_simps simps)
+end;
+
 fun analyse_dependencies (ctxt: Proof.context) thms =
   let
         val thy = Proof_Context.theory_of ctxt;
-        val thy_name = Context.theory_base_name thy ^ ".";
         val ctxt_suppressed_warnings = Context_Position.set_visible false ctxt;
-        val simps = ctxt |> Raw_Simplifier.simpset_of |> Raw_Simplifier.dest_simps;
         val claset = Classical.get_cs (Context.Proof ctxt) |> Classical.rep_cs;
         val facts = Global_Theory.facts_of thy;
 
-        (* if for all used thm simplifications there is a simplification in the simpset
-           then it should remove it (since it is unnecessary) *)
-        fun is_simp xs = not (all_xs_not_in_ys xs simps);
-        fun exists_in_facts_table name = Facts.lookup (Context.Theory thy) (Global_Theory.facts_of thy) name |> Option.isSome
+
+        
+        fun exists_in_facts_table name = Facts.lookup (Context.Theory thy) facts name |> Option.isSome
         fun is_hidden name = Name_Space.extern ctxt (Facts.space_of facts) name |> Long_Name.is_hidden;
         fun is_protect name = (name = "Pure.protectI" orelse name = "Pure.protectD")
 
         val thm_deps = thm_dependencies' thy thms
-                |> filter (fn name => exists_in_facts_table name andalso not (is_hidden name) andalso not (is_protect name))
-                |> map (fn name => (if String.isPrefix thy_name name then unprefix thy_name name else name, Global_Theory.get_thms thy name));
-        
-        val thm_deps_without_standard_simps = thm_deps |> filter (fn (_, thm_deps)  => 
-          let
-            (* this can be empty which will also filter it out *)
-            val thm_deps_as_simps = thm_deps |> maps (Raw_Simplifier.mksimps ctxt);
-          in
-            not (null thm_deps_as_simps) andalso not (is_simp thm_deps_as_simps)
-        end);
+                |> filter (fn name => exists_in_facts_table name andalso 
+                                      not (is_hidden name) andalso 
+                                      not (is_protect name))
+                |> map (fn name => 
+                  let 
+                    val thm_deps = Global_Theory.get_thms thy name
+                    val short_name = if length thm_deps = 1 then 
+                      ATP_Util.short_thm_name ctxt (the_single thm_deps) else 
+                      name
+                  in (short_name, thm_deps) end)
+                |> filter_out (fn (_, thm_deps) => 
+                    forall Sledgehammer_Fact.is_likely_tautology_too_meta_or_too_technical thm_deps);
+
+        (* if for all used thm simplifications there is a simplification in the simpset
+           then it should remove it (since it is unnecessary) *)
+        val thm_deps_without_standard_simps = thm_deps |> filter_out (fn (_, thm_deps)  => 
+            is_standard_simp ctxt thm_deps
+        );
         fun is_intro (name, used_thms) = 
             String.isSuffix (trimr_non_alpha "I") name andalso 
             not (is_standard_SIs used_thms claset) andalso 
