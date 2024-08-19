@@ -66,14 +66,15 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
       let
         val ctxt = Toplevel.context_of post;
         val thms = get_thms pre post |> maps snd;
-        val thm_deps = Proof_Improve_Dependency_Analyser.analyse_dependencies ctxt thms;
 
         val proof_text = get_content spans
         val outcome =
-          if proof_text = "" orelse null thms then
+          if proof_text = "" then
             Unknown "segment could not be matched\n"
+          else if null thms then
+            Timeout.apply generous_timeout proof_improve_old pre proof_text
           else
-            Timeout.apply generous_timeout proof_improve pre proof_text thms ctxt thm_deps
+            Timeout.apply generous_timeout proof_improve proof_text thms ctxt
         val current_data = Synchronized.value data
         val updated_data =
           case outcome of
@@ -84,8 +85,7 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
       in
         Synchronized.change data (fn _ => updated_data);
         "Outcome: " ^ string_of_outcome outcome ^ "\n" ^
-        "Current Thm: " ^ (map (Pretty.string_of o Thm.pretty_thm ctxt) thms |> cat_lines) ^ "\n" ^
-        "Filtered dependencies: " ^ @{make_string} (thm_deps) ^ "\n"
+        "Current Thm: " ^ (map (Pretty.string_of o Thm.pretty_thm ctxt) thms |> cat_lines) ^ "\n"
       end
 
     fun finalize () : string = to_string (Synchronized.value data)

@@ -7,6 +7,7 @@ Finding proof alternatives using Sledgehammer and try0.
 signature PROOF_IMPROVE_FINDER =
 sig
   val find: Proof.state -> Proof_Improve_Dependency_Analyser.outcome -> (int * string * string) option
+  val find_old: Proof.state -> (int * string * string) option
 end;
 
 structure Proof_Improve_Finder: PROOF_IMPROVE_FINDER =
@@ -72,13 +73,17 @@ in
   result_trimmed
 end;
 
-fun subsets []: 'a list list = [[]]
-  | subsets (x::xs) =
+(* final list is 2^(length xs) long e.g. [[], [1], [2], [3], [1, 2], [1, 3], ...] *)
+fun powerset []: 'a list list = [[]]
+  | powerset (x::xs) =
       let
-        val rest_subsets = subsets xs
+        val rest_subsets = powerset xs
       in
-         rest_subsets @ (map (fn subset => subset @ [x]) rest_subsets)
+         rest_subsets @ (map (fn rest => rest @ [x]) rest_subsets)
       end;
+
+(* final list is length xs long e.g. [[], [1], [1, 2]] *)
+fun take_n_subsets xs = 0 upto (length xs) -1 |> map (fn i => take i xs)
 
 (* Cartesian product of a list of lists *)
 fun cartesian_product (xss: 'a list list): 'a list list = 
@@ -91,20 +96,15 @@ end;
 
 fun proof_search (st: Proof.state) ({simp, intro, elim, dest} : Try0.try0_params) timeout =
   let
-    val simp_sets = if length simp < 10 then subsets (rev simp) else [[], simp];
-    val intro_sets = if length intro < 10 then subsets (rev intro) else [[], intro];
-    val elim_sets = if length elim < 10 then subsets (rev elim) else [[], elim];
-    val dest_sets = if length dest < 10 then subsets (rev dest) else [[], dest];
+    fun subsets xs = if length xs < 5 then powerset (rev xs) else 
+                     if length xs < 100 then take_n_subsets xs else [[], xs]
+    val simp_sets = subsets simp;
+    val intro_sets = subsets intro;
+    val elim_sets = subsets elim;
+    val dest_sets = subsets dest;
     fun apply_try0 [simp_set, intro_set, elim_set, dest_set] = 
-    let
-      val _ = writeln ("try0 (" ^ 
-        "simp: " ^ space_implode " " (simp_set) ^ 
-        " intro: " ^ space_implode " " (intro_set) ^ 
-        " elim: " ^ space_implode " " (elim_set) ^ 
-        " dest: " ^ space_implode " " (dest_set) ^ ")");
-    in
-      case Try0.generic_try0 Try0.Non_Interactive (SOME timeout) {
-        simp = simp_set, 
+      (case Try0.generic_try0 Try0.Non_Interactive (SOME timeout) {
+        simp = simp_set,
         intro = intro_set,
         elim = elim_set,
         dest = dest_set
@@ -116,16 +116,27 @@ fun proof_search (st: Proof.state) ({simp, intro, elim, dest} : Try0.try0_params
             if String.isSubstring "apply" parsed_message then NONE else
             SOME ((name, parsed_message), {simp = simp_set, intro = intro_set, elim = elim_set, dest = dest_set})
           end 
-      | _ => NONE
-    end |
-      apply_try0 _ = NONE
-    
+      | _ => NONE)
+     | apply_try0 _ = NONE
   in
     cartesian_product [simp_sets, intro_sets, elim_sets, dest_sets] |> get_first apply_try0
 end;
 
+fun run_try0 (st: Proof.state) classified = 
+  case proof_search st classified (Time.fromSeconds 4) of
+    SOME ((name, message), {simp, intro, elim, dest}) =>
+      let
+        val log = "Try0: " ^ name ^ 
+          " with simp: " ^ @{make_string} (length simp) ^ 
+          " intro: " ^ @{make_string} (length intro) ^ 
+          " elim: " ^ @{make_string} (length elim) ^ 
+          " dest: " ^ @{make_string} (length dest)
+      in
+        SOME (0 (*length simp + length intro + length elim + length dest*), log, message)
+      end
+  | NONE => NONE
 
-fun find (st: Proof.state) {all_dependencies, classified} =
+fun run_sledgehammer (st: Proof.state) all_dependencies = 
   let
     val params = Sledgehammer_Commands.default_params \<^theory> []
     val four_seconds = Time.fromSeconds 4
@@ -164,8 +175,8 @@ fun find (st: Proof.state) {all_dependencies, classified} =
     val fact_override = {add = map (fn thm => (Facts.named thm, [])) all_dependencies, del = [], only = true}
     val (_, (outcome, try_this)) =  Sledgehammer.run_sledgehammer sledgehammer_timeout_params
       Sledgehammer_Prover.Normal NONE 1 fact_override st
-  in
-    case outcome of
+in
+  case outcome of
       Sledgehammer.SH_Some (prover_result, _) =>
         (case #outcome prover_result of
            NONE =>
@@ -179,11 +190,20 @@ fun find (st: Proof.state) {all_dependencies, classified} =
                SOME (0(*List.length facts*), "Sledgehammer", result)
            end
          | SOME _ => NONE)
-    | _ => 
-      case proof_search st classified four_seconds of
-        SOME ((name, message), {simp, intro, elim, dest}) =>
-          SOME (0 (*length simp + length intro + length elim + length dest*), 
-                "Try0: " ^ name, message)
-        | NONE => NONE
-  end
+    | _ => NONE
+end;
+
+fun find_old (st: Proof.state) = case run_sledgehammer st [] of
+    SOME (facts, name, result) => SOME (facts, "Old Sledgehammer", result)
+  | NONE => NONE
+
+fun find (st: Proof.state) {all_dependencies, classified} =
+  case run_try0 st {simp = [], intro = [], elim = [], dest = []} of
+    SOME result => SOME result
+  | NONE => case run_sledgehammer st all_dependencies of
+    SOME result => SOME result
+  | NONE => 
+  case run_try0 st classified of
+    SOME result => SOME result
+  | NONE => NONE
 end;

@@ -8,6 +8,7 @@ sig
   type outcome = {all_dependencies: string list, classified: Try0.try0_params}
   val analyse_dependencies : Proof.context -> thm list -> outcome
   val is_standard_simp : Proof.context -> thm list -> bool;
+  val is_classical : Proof.context -> thm list -> bool;
 end;
 
 structure Proof_Improve_Dependency_Analyser: PROOF_IMPROVE_DEPENDENCY_ANALYSER =
@@ -54,6 +55,17 @@ fun is_standard_Ds xs claset = xs
   |> filter (fn x => not (has_fewer_prems 1 x))
   |> map Tactic.make_elim
   |> claset_member (claset |> #unsafeEs);
+
+fun is_classical ctxt thms = let
+  val claset = Classical.get_cs (Context.Proof ctxt) |> Classical.rep_cs;
+in                                                                         
+  is_standard_SIs thms claset orelse
+  is_standard_Is  thms claset orelse
+  is_standard_SEs thms claset orelse
+  is_standard_Es  thms claset orelse
+  is_standard_SDs thms claset orelse
+  is_standard_Ds thms claset
+end;
 
 fun is_standard_simp ctxt thms = let
   val simps = ctxt |> Raw_Simplifier.simpset_of |> Raw_Simplifier.dest_simps;
