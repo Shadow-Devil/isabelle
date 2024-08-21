@@ -36,7 +36,7 @@ fun string_of_outcome outcome =
     | ScoreNotLowered log => "Score Not Lowered\n" ^ log
     | GoodEnoughUnderCutoff log => "Good Enough; The Score is under the Cutoff\n" ^ log
 
-fun postprocess_result finder_result initial_log original_score dependency_msg = 
+fun postprocess_result finder_result initial_log original_score dependency_msg =
     case finder_result of
       NONE =>
         let
@@ -47,7 +47,7 @@ fun postprocess_result finder_result initial_log original_score dependency_msg =
     | SOME (found_facts, found_by, found_proof_text) =>
       let
         val (found_score, found_log) = score found_facts found_proof_text
-        val found_score_msg = "Scorer result (found): " ^ Real.toString found_score ^" \n" ^ 
+        val found_score_msg = "Scorer result (found): " ^ Real.toString found_score ^" \n" ^
                               "Found by: " ^ found_by ^ "\n"
         val combined_log = initial_log ^ "\n" ^ found_log ^ found_score_msg ^ dependency_msg
       in
@@ -60,7 +60,7 @@ fun postprocess_result finder_result initial_log original_score dependency_msg =
       end
 
 
-fun proof_improve_old st proof_text = 
+fun proof_improve_old st proof_text =
   let
     val (original_score, original_log) = score
       (List.length [] (*Proof.the_fact_or_facts st*)) proof_text
@@ -75,13 +75,14 @@ fun proof_improve_old st proof_text =
 
 fun proof_improve proof_text thms ctxt =
   let
+    val thm_deps = Proof_Improve_Dependency_Analyser.analyse_dependencies ctxt thms;
+
     val is_declared_as_simp = is_standard_simp ctxt thms;
     val is_declared_as_classical = is_classical ctxt thms;
-    val ctxt = if is_declared_as_simp then Raw_Simplifier.delsimps (ctxt, thms) else ctxt;
-    val ctxt = if is_declared_as_classical then Classical.delrules (ctxt, thms) else ctxt;
-    val proof_st = ctxt |> Proof.theorem NONE (K I) [thms |> map (fn thm => 
+    val ctxt' = if is_declared_as_simp then Raw_Simplifier.delsimps (ctxt, thms) else ctxt;
+    (*val ctxt'' = if is_declared_as_classical then Classical.delrules (ctxt', thms) else ctxt';*)
+    val proof_st = ctxt' |> Proof.theorem NONE (K I) [thms |> map (fn thm =>
                           (Thm.prop_of (Misc_Legacy.freeze_thaw_robust ctxt thm |> #1), []))];
-    val thm_deps = Proof_Improve_Dependency_Analyser.analyse_dependencies ctxt thms;
 
     val (original_score, original_log) = score
       (List.length [] (*Proof.the_fact_or_facts st*)) proof_text
@@ -90,11 +91,9 @@ fun proof_improve proof_text thms ctxt =
   in
     if original_score < 0.0 (*Disabled for testing... 4.5*) then
       GoodEnoughUnderCutoff (initial_log ^ "\n\n")
-    else 
-      postprocess_result (find proof_st thm_deps) initial_log original_score 
+    else
+      postprocess_result (find proof_st thm_deps) initial_log original_score
         ("Filtered dependencies: " ^ @{make_string} (thm_deps) ^ "\n")
   end;
-
-
 
 end

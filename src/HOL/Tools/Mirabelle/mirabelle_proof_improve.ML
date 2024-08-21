@@ -72,7 +72,8 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
           if proof_text = "" then
             Unknown "segment could not be matched\n"
           else if null thms then
-            Timeout.apply generous_timeout proof_improve_old pre proof_text
+            (*Timeout.apply generous_timeout proof_improve_old pre proof_text*)
+            Unknown "Thm could not be found\n"
           else
             Timeout.apply generous_timeout proof_improve proof_text thms ctxt
         val current_data = Synchronized.value data
