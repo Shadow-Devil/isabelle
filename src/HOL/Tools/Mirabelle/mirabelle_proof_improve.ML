@@ -39,7 +39,7 @@ fun get_content spans : string =
 
 fun get_thms (st: Proof.state) (st': Toplevel.state): (string * thm list) list =
   let
-    val get_facts: Toplevel.state -> Facts.T  = Proof_Context.facts_of o Proof.context_of o Toplevel.proof_of
+    val get_facts  = Proof_Context.facts_of o Proof.context_of o Toplevel.proof_of
     val facts = (Proof_Context.facts_of o Proof.context_of) st
     val (factss, facts') = (
       if Toplevel.is_proof st' then
@@ -64,13 +64,15 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
 
     fun run ({pre, spans, pos, post, ...} : Mirabelle.command) : string =
       let
-        val ctxt = Toplevel.context_of post;
-        val thms = get_thms pre post |> maps snd;
-
+        val ctxt = Toplevel.context_of post
+        val (thms, get_thms_timing) = Mirabelle.cpu_time (get_thms pre) post |> apfst (maps snd)
         val proof_text = get_content spans
+
         val outcome =
           if proof_text = "" then
             Unknown "segment could not be matched\n"
+          else if String.isSubstring "induct" proof_text then
+            Unknown "skipped induction proof for performance reasons"
           else if null thms then
             (*Timeout.apply generous_timeout proof_improve_old pre proof_text*)
             Unknown "Thm could not be found\n"
@@ -85,8 +87,10 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
                add_unsuccessful_call current_data
       in
         Synchronized.change data (fn _ => updated_data);
-        "Outcome: " ^ string_of_outcome outcome ^ "\n" ^
-        "Current Thm: " ^ (map (Pretty.string_of o Thm.pretty_thm ctxt) thms |> cat_lines) ^ "\n"
+        cat_lines [
+          "Current Thm: " ^ (map (ATP_Util.short_thm_name ctxt) thms |> space_implode " "),
+          "get_thms_timing: " ^ Int.toString get_thms_timing ^ "ms",
+          "Outcome: " ^ string_of_outcome outcome]
       end
 
     fun finalize () : string = to_string (Synchronized.value data)

@@ -95,6 +95,9 @@ fun print_exn exn =
   | exn => "exception: " ^ General.exnMessage exn);
 
 fun run_action_function f =
+(* Isabelle2024
+  \<^try>\<open>f () catch exn => print_exn exn\<close>;
+*)
   f () handle exn =>
     if Exn.is_interrupt exn then Exn.reraise exn
     else print_exn exn;

@@ -136,11 +136,15 @@ fun silence_methods debug =
       ctxt
       |> Simplifier_Trace.disable
       |> Context_Position.set_visible false
+      (* Isabelle2024
+      |> Config.put Unify.unify_trace false *)
       |> Config.put Unify.trace_bound (Config.get ctxt Unify.search_bound)
       |> Config.put Argo_Tactic.trace "none"
       |> Proof_Context.background_theory (fn thy =>
           thy
           |> Context_Position.set_visible_global false
+          (* Isabelle2024
+          |> Config.put_global Unify.unify_trace false)) *)
           |> Config.put_global Unify.trace_bound (Config.get_global thy Unify.search_bound)));
 
 fun generic_try0 mode timeout_opt (params: try0_params) st =

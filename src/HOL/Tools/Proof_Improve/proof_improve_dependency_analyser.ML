@@ -23,7 +23,7 @@ fun trimr_non_alpha s = s
   |> Substring.dropr (not o Char.isAlpha)
   |> Substring.string;
 
-fun thm_dependencies_internal' (thy: theory) (limit: int option) (thm: thm) =
+fun thm_dependencies_internal (thy: theory) (limit: int option) (thm: thm) =
   let
     fun deps lvl (i, thm_node) = let val thm_id = Proofterm.thm_id (i, thm_node) in
           (case Global_Theory.lookup_thm_id thy thm_id of
@@ -36,7 +36,7 @@ fun thm_dependencies_internal' (thy: theory) (limit: int option) (thm: thm) =
       (maps (deps 0) o Thm.thm_deps o Thm.transfer thy) thm
   end;
 
-fun thm_dependencies' thy thms = maps (thm_dependencies_internal' thy (SOME 4)) thms
+fun thm_dependencies thy thms = maps (thm_dependencies_internal thy (SOME 4)) thms
     |> sort (int_ord o apply2 fst)
     |> map (#2)
     |> distinct (op =);
@@ -83,11 +83,13 @@ fun analyse_dependencies (ctxt: Proof.context) thms =
 
 
         
-        fun exists_in_facts_table name = Facts.lookup (Context.Theory thy) facts name |> Option.isSome
-        fun is_hidden name = Name_Space.extern ctxt (Facts.space_of facts) name |> Long_Name.is_hidden;
+        fun exists_in_facts_table name = Facts.lookup (Context.Theory thy) facts name 
+                                          |> Option.isSome
+        fun is_hidden name = Name_Space.extern ctxt (Facts.space_of facts) name 
+                              |> Long_Name.is_hidden
         fun is_protect name = (name = "Pure.protectI" orelse name = "Pure.protectD")
 
-        val thm_deps = thm_dependencies' thy thms
+        val thm_deps = thm_dependencies thy thms
                 |> filter (fn name => exists_in_facts_table name andalso 
                                       not (is_hidden name) andalso 
                                       not (is_protect name))
@@ -99,7 +101,7 @@ fun analyse_dependencies (ctxt: Proof.context) thms =
                       name
                   in (short_name, thm_deps) end)
                 |> filter_out (fn (_, thm_deps) => 
-                    forall Sledgehammer_Fact.is_likely_tautology_too_meta_or_too_technical thm_deps);
+                    forall Sledgehammer_Fact.is_likely_tautology_too_meta_or_too_technical thm_deps)
 
         (* if for all used thm simplifications there is a simplification in the simpset
            then it should remove it (since it is unnecessary) *)
@@ -129,17 +131,18 @@ fun analyse_dependencies (ctxt: Proof.context) thms =
         val elims = thm_deps_without_standard_simps |> filter is_elim;
         val dest = thm_deps_without_standard_simps |> filter is_dest;
 
-        val thm_deps_without_intro_elim_dest = thm_deps_without_standard_simps |> filter (fn (_, simp_thms) =>
-          all_xs_not_in_ys simp_thms (intros |> maps #2) andalso
-          all_xs_not_in_ys simp_thms (elims |> maps #2) andalso
-          all_xs_not_in_ys simp_thms (dest |> maps #2) andalso
-          not (is_standard_SIs simp_thms claset) andalso 
-          not (is_standard_Is simp_thms claset) andalso
-          not (is_standard_SEs simp_thms claset) andalso 
-          not (is_standard_Es simp_thms claset) andalso
-          not (is_standard_SDs simp_thms claset) andalso 
-          not (is_standard_Ds simp_thms claset)
-        );
+        val thm_deps_without_intro_elim_dest = thm_deps_without_standard_simps 
+          |> filter (fn (_, simp_thms) =>
+            all_xs_not_in_ys simp_thms (intros |> maps #2) andalso
+            all_xs_not_in_ys simp_thms (elims |> maps #2) andalso
+            all_xs_not_in_ys simp_thms (dest |> maps #2) andalso
+            not (is_standard_SIs simp_thms claset) andalso 
+            not (is_standard_Is simp_thms claset) andalso
+            not (is_standard_SEs simp_thms claset) andalso 
+            not (is_standard_Es simp_thms claset) andalso
+            not (is_standard_SDs simp_thms claset) andalso 
+            not (is_standard_Ds simp_thms claset)
+          );
   in
     {
       all_dependencies = thm_deps_without_standard_simps |> map #1,
