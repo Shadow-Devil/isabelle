@@ -203,8 +203,7 @@ fun score facts proof_text =
     val (used_methods_score, weight_used_methods, used_methods_report) =
          case used_methods_score_opt of
               NONE => (0.0, 0.0, "no by's or proof's found\n")
-              | SOME x => (Real.max (x, 100.0), get_weight_used_methods (), 
-                           "Used methods score: " ^ Real.toString x ^ "\n")
+              | SOME x => (Real.max (x, 100.0), get_weight_used_methods (), "Used methods score: " ^ Real.toString x ^ "\n")
 
     val weighted_sum = (length_score * weight_length) + (fact_score * weight_lemma) +
                        (entropy_score * weight_entropy) + (depth_score * weight_depth) +
