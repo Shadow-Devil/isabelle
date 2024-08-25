@@ -41,10 +41,11 @@ fun postprocess_result finder_result initial_log original_score dependency_msg =
       (proof_search_time, (proof_log, NONE)) =>
         let
           val log_msg = cat_lines [
-            initial_log, 
-            "No potential rewrite found.", 
+            initial_log,
+            "No potential rewrite found.",
+            "Analytics:",
             dependency_msg,
-            "Time took for proof search: " ^ Int.toString proof_search_time,
+            "Time took for proof search: " ^ Int.toString proof_search_time ^ "ms",
             proof_log]
         in
           NoAlternativeFound (log_msg ^ "\n\n")
@@ -55,7 +56,6 @@ fun postprocess_result finder_result initial_log original_score dependency_msg =
         val combined_log = cat_lines [
           initial_log, 
           found_log ^ "Scorer result (found): " ^ Real.toString found_score,
-          "",
           "Analytics:",
           dependency_msg,
           "Time took for proof search: " ^ Int.toString proof_search_time ^ "ms",

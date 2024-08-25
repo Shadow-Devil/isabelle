@@ -89,8 +89,8 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
         Synchronized.change data (fn _ => updated_data);
         cat_lines [
           "Current Thm: " ^ (map (ATP_Util.short_thm_name ctxt) thms |> space_implode " "),
-          "get_thms_timing: " ^ Int.toString get_thms_timing ^ "ms",
-          "Outcome: " ^ string_of_outcome outcome]
+          "Outcome: " ^ string_of_outcome outcome,
+          "get_thms_timing: " ^ Int.toString get_thms_timing ^ "ms"]
       end
 
     fun finalize () : string = to_string (Synchronized.value data)
