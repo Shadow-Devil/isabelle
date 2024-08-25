@@ -41,6 +41,8 @@ object Linux {
 
     def is_ubuntu: Boolean = id == "Ubuntu"
     def is_ubuntu_20_04: Boolean = is_ubuntu && release == "20.04"
+    def is_ubuntu_22_04: Boolean = is_ubuntu && release == "22.04"
+    def is_ubuntu_24_04: Boolean = is_ubuntu && release == "24.04"
   }
 
 
@@ -144,4 +146,14 @@ fi
     require(length >= 6, "password too short")
     Isabelle_System.bash("pwgen " + length + " 1").check.out
   }
+
+
+  /* PHP */
+
+  def php_version(): String =
+    Isabelle_System.bash("""php --run 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;'""")
+      .check.out
+
+  def php_conf_dir(name: String): Path =
+    Path.explode("/etc/php") + Path.basic(php_version()) + Path.basic(name) + Path.explode("conf.d")
 }

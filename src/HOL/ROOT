@@ -104,7 +104,8 @@ session "HOL-Analysis" (main timing) in Analysis = HOL +
     "HOL-Library"
     "HOL-Combinatorics"
     "HOL-Computational_Algebra"
-  theories
+    "HOL-Real_Asymp"
+theories
     Analysis
   document_files
     "root.tex"
@@ -147,6 +148,9 @@ session "HOL-Computational_Algebra" (main timing) in "Computational_Algebra" = "
     Computational_Algebra
     (*conflicting type class instantiations and dependent applications*)
     Field_as_Ring
+  document_files
+    "root.tex"
+    "root.bib"
 
 session "HOL-Real_Asymp" in Real_Asymp = HOL +
   sessions
@@ -394,9 +398,10 @@ session "HOL-Metis_Examples" (timing) in Metis_Examples = "HOL-Library" +
     Clausification
     Message
     Proxies
+    Sets
+    Sledgehammer_Isar_Proofs
     Tarski
     Trans_Closure
-    Sets
 
 session "HOL-Nitpick_Examples" in Nitpick_Examples = HOL +
   description "
@@ -431,6 +436,7 @@ session "HOL-Algebra" (main timing) in Algebra = "HOL-Computational_Algebra" +
     Divisibility         (* Rings *)
     IntRing              (* Ideals and residue classes *)
     UnivPoly             (* Polynomials *)
+    Algebraic_Closure_Type
     (* Main theory *)
     Algebra
   document_files "root.bib" "root.tex"

@@ -276,10 +276,10 @@ fun run_atp mode name
       end
 
     val ((_, pool, lifted, sym_tab),
-         (output, run_time, used_from, atp_problem, tstplike_proof, atp_proof,
+         (_, run_time, used_from, atp_problem, tstplike_proof, atp_proof,
           atp_abduce_candidates, outcome),
          (format, type_enc)) =
-      with_cleanup clean_up run () |> tap export
+      \<^try>\<open>run () finally clean_up ()\<close> |> tap export
 
     val (outcome, used_facts, preferred_methss, message) =
       (case outcome of
@@ -289,7 +289,8 @@ fun run_atp mode name
           val _ =
             if mode = Normal andalso not (is_conjecture_used_in_proof atp_proof)
                andalso not (Logic.get_goal (Thm.prop_of goal) subgoal aconv @{prop False}) then
-              warning ("Derived \"False\" from these facts alone: " ^ commas (map fst used_facts))
+              warning ("Derived \"False\" from these facts alone: " ^
+                space_implode " " (map fst used_facts))
             else
               ()
 
@@ -324,6 +325,7 @@ fun run_atp mode name
                       full_atp_proof
                       |> termify_atp_proof ctxt name format type_enc pool lifted sym_tab
                       |> local_name = spassN ? introduce_spass_skolems
+                      |> local_name = zipperpositionN ? regroup_zipperposition_skolems
                       |> factify_atp_proof (map fst used_from) hyp_ts concl_t
                   in
                     (verbose, (metis_type_enc, metis_lam_trans), preplay_timeout, compress, try0,

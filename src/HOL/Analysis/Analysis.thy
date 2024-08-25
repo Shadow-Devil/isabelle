@@ -12,6 +12,7 @@ theory Analysis
   Connected
   Abstract_Limits
   Isolated
+  Sparse_In
   (* Functional Analysis *)
   Elementary_Normed_Spaces
   Norm_Arith
@@ -22,6 +23,7 @@ theory Analysis
   Line_Segment
   Derivative
   Cartesian_Euclidean_Space
+  Kronecker_Approximation_Theorem
   Weierstrass_Theorems
   (* Measure and Integration Theory *)
   Ball_Volume

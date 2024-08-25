@@ -12,16 +12,16 @@ begin
 subsection \<open>Ring structures with parity and \<open>even\<close>/\<open>odd\<close> predicates\<close>
 
 class semiring_parity = comm_semiring_1 + semiring_modulo +
-  assumes even_iff_mod_2_eq_zero: "2 dvd a \<longleftrightarrow> a mod 2 = 0"
-    and odd_iff_mod_2_eq_one: "\<not> 2 dvd a \<longleftrightarrow> a mod 2 = 1"
-    and odd_one [simp]: "\<not> 2 dvd 1"
+  assumes mod_2_eq_odd: \<open>a mod 2 = of_bool (\<not> 2 dvd a)\<close>
+    and odd_one [simp]: \<open>\<not> 2 dvd 1\<close>
+    and even_half_succ_eq [simp]: \<open>2 dvd a \<Longrightarrow> (1 + a) div 2 = a div 2\<close>
 begin
 
 abbreviation even :: "'a \<Rightarrow> bool"
-  where "even a \<equiv> 2 dvd a"
+  where \<open>even a \<equiv> 2 dvd a\<close>
 
 abbreviation odd :: "'a \<Rightarrow> bool"
-  where "odd a \<equiv> \<not> 2 dvd a"
+  where \<open>odd a \<equiv> \<not> 2 dvd a\<close>
 
 end
 
@@ -33,7 +33,7 @@ subclass comm_ring_1 ..
 end
 
 instance nat :: semiring_parity
-  by standard (simp_all add: dvd_eq_mod_eq_0)
+  by standard (auto simp add: dvd_eq_mod_eq_0)
 
 instance int :: ring_parity
   by standard (auto simp add: dvd_eq_mod_eq_0)
@@ -41,47 +41,44 @@ instance int :: ring_parity
 context semiring_parity
 begin
 
-lemma parity_cases [case_names even odd]:
-  assumes "even a \<Longrightarrow> a mod 2 = 0 \<Longrightarrow> P"
-  assumes "odd a \<Longrightarrow> a mod 2 = 1 \<Longrightarrow> P"
-  shows P
-  using assms by (cases "even a")
-    (simp_all add: even_iff_mod_2_eq_zero [symmetric] odd_iff_mod_2_eq_one [symmetric])
+lemma evenE [elim?]:
+  assumes \<open>even a\<close>
+  obtains b where \<open>a = 2 * b\<close>
+  using assms by (rule dvdE)
+
+lemma oddE [elim?]:
+  assumes \<open>odd a\<close>
+  obtains b where \<open>a = 2 * b + 1\<close>
+proof -
+  have \<open>a = 2 * (a div 2) + a mod 2\<close>
+    by (simp add: mult_div_mod_eq)
+  with assms have \<open>a = 2 * (a div 2) + 1\<close>
+    by (simp add: mod_2_eq_odd)
+  then show thesis ..
+qed
+
+lemma of_bool_odd_eq_mod_2:
+  \<open>of_bool (odd a) = a mod 2\<close>
+  by (simp add: mod_2_eq_odd)
 
 lemma odd_of_bool_self [simp]:
   \<open>odd (of_bool p) \<longleftrightarrow> p\<close>
   by (cases p) simp_all
 
 lemma not_mod_2_eq_0_eq_1 [simp]:
-  "a mod 2 \<noteq> 0 \<longleftrightarrow> a mod 2 = 1"
-  by (cases a rule: parity_cases) simp_all
+  \<open>a mod 2 \<noteq> 0 \<longleftrightarrow> a mod 2 = 1\<close>
+  by (simp add: mod_2_eq_odd)
 
 lemma not_mod_2_eq_1_eq_0 [simp]:
-  "a mod 2 \<noteq> 1 \<longleftrightarrow> a mod 2 = 0"
-  by (cases a rule: parity_cases) simp_all
+  \<open>a mod 2 \<noteq> 1 \<longleftrightarrow> a mod 2 = 0\<close>
+  by (simp add: mod_2_eq_odd)
 
-lemma evenE [elim?]:
-  assumes "even a"
-  obtains b where "a = 2 * b"
-  using assms by (rule dvdE)
+lemma even_iff_mod_2_eq_zero:
+  \<open>2 dvd a \<longleftrightarrow> a mod 2 = 0\<close>
+  by (simp add: mod_2_eq_odd)
 
-lemma oddE [elim?]:
-  assumes "odd a"
-  obtains b where "a = 2 * b + 1"
-proof -
-  have "a = 2 * (a div 2) + a mod 2"
-    by (simp add: mult_div_mod_eq)
-  with assms have "a = 2 * (a div 2) + 1"
-    by (simp add: odd_iff_mod_2_eq_one)
-  then show ?thesis ..
-qed
-
-lemma mod_2_eq_odd:
-  "a mod 2 = of_bool (odd a)"
-  by (auto elim: oddE simp add: even_iff_mod_2_eq_zero)
-
-lemma of_bool_odd_eq_mod_2:
-  "of_bool (odd a) = a mod 2"
+lemma odd_iff_mod_2_eq_one:
+  \<open>\<not> 2 dvd a \<longleftrightarrow> a mod 2 = 1\<close>
   by (simp add: mod_2_eq_odd)
 
 lemma even_mod_2_iff [simp]:
@@ -92,8 +89,22 @@ lemma mod2_eq_if:
   "a mod 2 = (if even a then 0 else 1)"
   by (simp add: mod_2_eq_odd)
 
+lemma zero_mod_two_eq_zero [simp]:
+  \<open>0 mod 2 = 0\<close>
+  by (simp add: mod_2_eq_odd)
+
+lemma one_mod_two_eq_one [simp]:
+  \<open>1 mod 2 = 1\<close>
+  by (simp add: mod_2_eq_odd)
+
+lemma parity_cases [case_names even odd]:
+  assumes \<open>even a \<Longrightarrow> a mod 2 = 0 \<Longrightarrow> P\<close>
+  assumes \<open>odd a \<Longrightarrow> a mod 2 = 1 \<Longrightarrow> P\<close>
+  shows P
+  using assms by (auto simp add: mod_2_eq_odd)
+
 lemma even_zero [simp]:
-  "even 0"
+  \<open>even 0\<close>
   by (fact dvd_0_right)
 
 lemma odd_even_add:
@@ -180,6 +191,14 @@ lemma even_power [simp]: "even (a ^ n) \<longleftrightarrow> even a \<and> n > 0
 lemma even_prod_iff:
   \<open>even (prod f A) \<longleftrightarrow> (\<exists>a\<in>A. even (f a))\<close> if \<open>finite A\<close>
   using that by (induction A) simp_all
+
+lemma even_half_maybe_succ_eq [simp]:
+  \<open>even a \<Longrightarrow> (of_bool b + a) div 2 = a div 2\<close>
+  by simp
+
+lemma even_half_maybe_succ'_eq [simp]:
+  \<open>even a \<Longrightarrow> (b mod 2 + a) div 2 = a div 2\<close>
+  by (simp add: mod2_eq_if)
 
 lemma mask_eq_sum_exp:
   \<open>2 ^ n - 1 = (\<Sum>m\<in>{q. q < n}. 2 ^ m)\<close>
@@ -306,6 +325,12 @@ proof (induct n rule: less_induct)
       by (simp add: k)
   qed
 qed
+
+lemma mod_double_nat:
+  \<open>n mod (2 * m) = n mod m \<or> n mod (2 * m) = n mod m + m\<close>
+  for m n :: nat
+  by (cases \<open>even (n div m)\<close>)
+    (simp_all add: mod_mult2_eq ac_simps even_iff_mod_2_eq_zero)
 
 context semiring_parity
 begin
@@ -522,9 +547,9 @@ lemma power_int_minus_one_mult_self' [simp]:
 end
 
 
-subsection \<open>Special case: euclidean rings containing the natural numbers\<close>
+subsection \<open>Special case: euclidean rings structurally containing the natural numbers\<close>
 
-class unique_euclidean_semiring_with_nat = semidom + semiring_char_0 + unique_euclidean_semiring +
+class linordered_euclidean_semiring = discrete_linordered_semidom + unique_euclidean_semiring +
   assumes of_nat_div: "of_nat (m div n) = of_nat m div of_nat n"
     and division_segment_of_nat [simp]: "division_segment (of_nat n) = 1"
     and division_segment_euclidean_size [simp]: "division_segment a * of_nat (euclidean_size a) = a"
@@ -611,15 +636,6 @@ lemma one_div_two_eq_zero [simp]:
   "1 div 2 = 0"
 proof -
   from of_nat_div [symmetric] have "of_nat 1 div of_nat 2 = of_nat 0"
-    by (simp only:) simp
-  then show ?thesis
-    by simp
-qed
-
-lemma one_mod_two_eq_one [simp]:
-  "1 mod 2 = 1"
-proof -
-  from of_nat_mod [symmetric] have "of_nat 1 mod of_nat 2 = of_nat 1"
     by (simp only:) simp
   then show ?thesis
     by simp
@@ -749,7 +765,7 @@ lemma exp_mod_exp:
   \<open>2 ^ m mod 2 ^ n = of_bool (m < n) * 2 ^ m\<close>
 proof -
   have \<open>(2::nat) ^ m mod 2 ^ n = of_bool (m < n) * 2 ^ m\<close> (is \<open>?lhs = ?rhs\<close>)
-    by (auto simp add: not_less monoid_mult_class.power_add dest!: le_Suc_ex)
+    by (auto simp add: linorder_class.not_less monoid_mult_class.power_add dest!: le_Suc_ex)
   then have \<open>of_nat ?lhs = of_nat ?rhs\<close>
     by simp
   then show ?thesis
@@ -789,33 +805,32 @@ lemma of_bool_half_eq_0 [simp]:
   \<open>of_bool b div 2 = 0\<close>
   by simp
 
+lemma of_nat_mod_double:
+  \<open>of_nat n mod (2 * of_nat m) = of_nat n mod of_nat m \<or> of_nat n mod (2 * of_nat m) = of_nat n mod of_nat m + of_nat m\<close>
+  by (simp add: mod_double_nat flip: of_nat_mod of_nat_add of_nat_mult of_nat_numeral)
+
 end
 
-class unique_euclidean_ring_with_nat = ring + unique_euclidean_semiring_with_nat
+instance nat :: linordered_euclidean_semiring
+  by standard simp_all
 
-instance nat :: unique_euclidean_semiring_with_nat
-  by standard (simp_all add: dvd_eq_mod_eq_0)
-
-instance int :: unique_euclidean_ring_with_nat
+instance int :: linordered_euclidean_semiring
   by standard (auto simp add: divide_int_def division_segment_int_def elim: contrapos_np)
 
-
-context unique_euclidean_semiring_with_nat
+context linordered_euclidean_semiring
 begin
 
 subclass semiring_parity
 proof
-  show "2 dvd a \<longleftrightarrow> a mod 2 = 0" for a
-    by (fact dvd_eq_mod_eq_0)
-  show "\<not> 2 dvd a \<longleftrightarrow> a mod 2 = 1" for a
-  proof
-    assume "a mod 2 = 1"
-    then show "\<not> 2 dvd a"
-      by auto
+  show \<open>a mod 2 = of_bool (\<not> 2 dvd a)\<close> for a
+  proof (cases \<open>2 dvd a\<close>)
+    case True
+    then show ?thesis
+      by (simp add: dvd_eq_mod_eq_0)
   next
-    assume "\<not> 2 dvd a"
+    case False
     have eucl: "euclidean_size (a mod 2) = 1"
-    proof (rule order_antisym)
+    proof (rule Orderings.order_antisym)
       show "euclidean_size (a mod 2) \<le> 1"
         using mod_size_less [of 2 a] by simp
       show "1 \<le> euclidean_size (a mod 2)"
@@ -834,19 +849,23 @@ proof
     then have "of_nat (euclidean_size a) mod 2 = 1"
       by (simp add: of_nat_mod)
     from \<open>\<not> 2 dvd a\<close> eucl
-    show "a mod 2 = 1"
+    have "a mod 2 = 1"
       by (auto intro: division_segment_eq_iff simp add: division_segment_mod)
-  qed
-  show "\<not> is_unit 2"
-  proof (rule notI)
-    assume "is_unit 2"
-    then have "of_nat 2 dvd of_nat 1"
+    with \<open>\<not> 2 dvd a\<close> show ?thesis
       by simp
-    then have "is_unit (2::nat)"
+  qed
+  show \<open>\<not> is_unit 2\<close>
+  proof
+    assume \<open>is_unit 2\<close>
+    then have \<open>of_nat 2 dvd of_nat 1\<close>
+      by simp
+    then have \<open>is_unit (2::nat)\<close>
       by (simp only: of_nat_dvd_iff)
     then show False
       by simp
   qed
+  show \<open>(1 + a) div 2 = a div 2\<close> if \<open>2 dvd a\<close> for a
+    using that by auto
 qed
 
 lemma even_succ_div_two [simp]:
@@ -900,31 +919,24 @@ lemma coprime_right_2_iff_odd [simp]:
 
 end
 
-context unique_euclidean_ring_with_nat
-begin
-
-subclass ring_parity ..
-
 lemma minus_1_mod_2_eq [simp]:
-  "- 1 mod 2 = 1"
+  \<open>- 1 mod 2 = (1::int)\<close>
   by (simp add: mod_2_eq_odd)
 
 lemma minus_1_div_2_eq [simp]:
-  "- 1 div 2 = - 1"
+  "- 1 div 2 = - (1::int)"
 proof -
-  from div_mult_mod_eq [of "- 1" 2]
-  have "- 1 div 2 * 2 = - 1 * 2"
+  from div_mult_mod_eq [of "- 1 :: int" 2]
+  have "- 1 div 2 * 2 = - 1 * (2 :: int)"
     using add_implies_diff by fastforce
   then show ?thesis
-    using mult_right_cancel [of 2 "- 1 div 2" "- 1"] by simp
+    using mult_right_cancel [of 2 "- 1 div 2" "- (1 :: int)"] by simp
 qed
 
-end
-
-context unique_euclidean_semiring_with_nat
+context linordered_euclidean_semiring
 begin
 
-lemma even_mask_div_iff':
+lemma even_decr_exp_div_exp_iff':
   \<open>even ((2 ^ m - 1) div 2 ^ n) \<longleftrightarrow> m \<le> n\<close>
 proof -
   have \<open>even ((2 ^ m - 1) div 2 ^ n) \<longleftrightarrow> even (of_nat ((2 ^ m - Suc 0) div 2 ^ n))\<close>
@@ -947,7 +959,8 @@ proof -
     moreover from False have \<open>{q. n \<le> q \<and> q < m \<and> q \<le> n} = {n}\<close>
       by auto
     then have \<open>odd ((\<Sum>a\<in>{q. n \<le> q \<and> q < m}. 2 ^ a div (2::nat) ^ n) + sum ((^) 2) {q. q < n} div 2 ^ n)\<close>
-      by (simp_all add: euclidean_semiring_cancel_class.power_diff_power_eq semiring_parity_class.even_sum_iff not_less mask_eq_sum_exp_nat [symmetric])
+      by (simp_all add: euclidean_semiring_cancel_class.power_diff_power_eq semiring_parity_class.even_sum_iff
+        linorder_class.not_less mask_eq_sum_exp_nat [symmetric])
     ultimately have \<open>odd (sum ((^) (2::nat)) {q. q < m} div 2 ^ n)\<close>
       by (subst euclidean_semiring_cancel_class.sum_div_partition) simp_all
     with False show ?thesis
@@ -967,7 +980,7 @@ text \<open>
   to its positive segments.
 \<close>
 
-class unique_euclidean_semiring_with_nat_division = unique_euclidean_semiring_with_nat +
+class linordered_euclidean_semiring_division = linordered_euclidean_semiring +
   fixes divmod :: \<open>num \<Rightarrow> num \<Rightarrow> 'a \<times> 'a\<close>
     and divmod_step :: \<open>'a \<Rightarrow> 'a \<times> 'a \<Rightarrow> 'a \<times> 'a\<close> \<comment> \<open>
       These are conceptually definitions but force generated code
@@ -1011,7 +1024,7 @@ next
   define r s t where \<open>r = (numeral m :: nat)\<close> \<open>s = (numeral n :: nat)\<close> \<open>t = 2 * s\<close>
   then have *: \<open>numeral m = of_nat r\<close> \<open>numeral n = of_nat s\<close> \<open>numeral (num.Bit0 n) = of_nat t\<close>
     and \<open>\<not> s \<le> r mod s\<close>
-    by (simp_all add: not_le)
+    by (simp_all add: linorder_class.not_le)
   have t: \<open>2 * (r div t) = r div s - r div s mod 2\<close>
     \<open>r mod t = s * (r div s mod 2) + r mod s\<close>
     by (simp add: Rings.minus_mod_eq_mult_div Groups.mult.commute [of 2] Euclidean_Rings.div_mult2_eq \<open>t = 2 * s\<close>)
@@ -1112,7 +1125,7 @@ lemma one_mod_numeral [simp]:
 
 end
 
-instantiation nat :: unique_euclidean_semiring_with_nat_division
+instantiation nat :: linordered_euclidean_semiring_division
 begin
 
 definition divmod_nat :: "num \<Rightarrow> num \<Rightarrow> nat \<times> nat"
@@ -1144,7 +1157,7 @@ lemma Suc_0_mod_numeral [simp]:
   \<open>Suc 0 mod numeral (Num.Bit1 n) = 1\<close>
   by simp_all
 
-instantiation int :: unique_euclidean_semiring_with_nat_division
+instantiation int :: linordered_euclidean_semiring_division
 begin
 
 definition divmod_int :: "num \<Rightarrow> num \<Rightarrow> int \<times> int"
@@ -1282,23 +1295,23 @@ lemma euclidean_size_int_less_eq_iff:
   by auto
 
 simproc_setup numeral_divmod
-  ("0 div 0 :: 'a :: unique_euclidean_semiring_with_nat_division" | "0 mod 0 :: 'a :: unique_euclidean_semiring_with_nat_division" |
-   "0 div 1 :: 'a :: unique_euclidean_semiring_with_nat_division" | "0 mod 1 :: 'a :: unique_euclidean_semiring_with_nat_division" |
+  ("0 div 0 :: 'a :: linordered_euclidean_semiring_division" | "0 mod 0 :: 'a :: linordered_euclidean_semiring_division" |
+   "0 div 1 :: 'a :: linordered_euclidean_semiring_division" | "0 mod 1 :: 'a :: linordered_euclidean_semiring_division" |
    "0 div - 1 :: int" | "0 mod - 1 :: int" |
-   "0 div numeral b :: 'a :: unique_euclidean_semiring_with_nat_division" | "0 mod numeral b :: 'a :: unique_euclidean_semiring_with_nat_division" |
+   "0 div numeral b :: 'a :: linordered_euclidean_semiring_division" | "0 mod numeral b :: 'a :: linordered_euclidean_semiring_division" |
    "0 div - numeral b :: int" | "0 mod - numeral b :: int" |
-   "1 div 0 :: 'a :: unique_euclidean_semiring_with_nat_division" | "1 mod 0 :: 'a :: unique_euclidean_semiring_with_nat_division" |
-   "1 div 1 :: 'a :: unique_euclidean_semiring_with_nat_division" | "1 mod 1 :: 'a :: unique_euclidean_semiring_with_nat_division" |
+   "1 div 0 :: 'a :: linordered_euclidean_semiring_division" | "1 mod 0 :: 'a :: linordered_euclidean_semiring_division" |
+   "1 div 1 :: 'a :: linordered_euclidean_semiring_division" | "1 mod 1 :: 'a :: linordered_euclidean_semiring_division" |
    "1 div - 1 :: int" | "1 mod - 1 :: int" |
-   "1 div numeral b :: 'a :: unique_euclidean_semiring_with_nat_division" | "1 mod numeral b :: 'a :: unique_euclidean_semiring_with_nat_division" |
+   "1 div numeral b :: 'a :: linordered_euclidean_semiring_division" | "1 mod numeral b :: 'a :: linordered_euclidean_semiring_division" |
    "1 div - numeral b :: int" |"1 mod - numeral b :: int" |
    "- 1 div 0 :: int" | "- 1 mod 0 :: int" | "- 1 div 1 :: int" | "- 1 mod 1 :: int" |
    "- 1 div - 1 :: int" | "- 1 mod - 1 :: int" | "- 1 div numeral b :: int" | "- 1 mod numeral b :: int" |
    "- 1 div - numeral b :: int" | "- 1 mod - numeral b :: int" |
-   "numeral a div 0 :: 'a :: unique_euclidean_semiring_with_nat_division" | "numeral a mod 0 :: 'a :: unique_euclidean_semiring_with_nat_division" |
-   "numeral a div 1 :: 'a :: unique_euclidean_semiring_with_nat_division" | "numeral a mod 1 :: 'a :: unique_euclidean_semiring_with_nat_division" |
+   "numeral a div 0 :: 'a :: linordered_euclidean_semiring_division" | "numeral a mod 0 :: 'a :: linordered_euclidean_semiring_division" |
+   "numeral a div 1 :: 'a :: linordered_euclidean_semiring_division" | "numeral a mod 1 :: 'a :: linordered_euclidean_semiring_division" |
    "numeral a div - 1 :: int" | "numeral a mod - 1 :: int" |
-   "numeral a div numeral b :: 'a :: unique_euclidean_semiring_with_nat_division" | "numeral a mod numeral b :: 'a :: unique_euclidean_semiring_with_nat_division" |
+   "numeral a div numeral b :: 'a :: linordered_euclidean_semiring_division" | "numeral a mod numeral b :: 'a :: linordered_euclidean_semiring_division" |
    "numeral a div - numeral b :: int" | "numeral a mod - numeral b :: int" |
    "- numeral a div 0 :: int" | "- numeral a mod 0 :: int" |
    "- numeral a div 1 :: int" | "- numeral a mod 1 :: int" |
@@ -1336,7 +1349,7 @@ simproc_setup numeral_divmod
 
 subsection \<open>Computing congruences modulo \<open>2 ^ q\<close>\<close>
 
-context unique_euclidean_semiring_with_nat_division
+context linordered_euclidean_semiring_division
 begin
 
 lemma cong_exp_iff_simps:

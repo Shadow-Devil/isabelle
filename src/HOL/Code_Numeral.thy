@@ -5,7 +5,7 @@
 section \<open>Numeric types for code generation onto target language numerals only\<close>
 
 theory Code_Numeral
-imports Divides Lifting Bit_Operations
+imports Lifting Bit_Operations
 begin
 
 subsection \<open>Type of target language integers\<close>
@@ -178,45 +178,58 @@ lemma integer_of_num_triv:
   "integer_of_num (Num.Bit0 Num.One) = 2"
   by simp_all
 
-instantiation integer :: "{linordered_idom, equal}"
+instantiation integer :: equal
 begin
 
-lift_definition abs_integer :: "integer \<Rightarrow> integer"
-  is "abs :: int \<Rightarrow> int"
+lift_definition equal_integer :: \<open>integer \<Rightarrow> integer \<Rightarrow> bool\<close>
+  is \<open>HOL.equal :: int \<Rightarrow> int \<Rightarrow> bool\<close>
+  .
+
+instance
+  by (standard; transfer) (fact equal_eq)
+
+end
+
+instantiation integer :: linordered_idom
+begin
+
+lift_definition abs_integer :: \<open>integer \<Rightarrow> integer\<close>
+  is \<open>abs :: int \<Rightarrow> int\<close>
   .
 
 declare abs_integer.rep_eq [simp]
 
-lift_definition sgn_integer :: "integer \<Rightarrow> integer"
-  is "sgn :: int \<Rightarrow> int"
+lift_definition sgn_integer :: \<open>integer \<Rightarrow> integer\<close>
+  is \<open>sgn :: int \<Rightarrow> int\<close>
   .
 
 declare sgn_integer.rep_eq [simp]
 
-lift_definition less_eq_integer :: "integer \<Rightarrow> integer \<Rightarrow> bool"
-  is "less_eq :: int \<Rightarrow> int \<Rightarrow> bool"
+lift_definition less_eq_integer :: \<open>integer \<Rightarrow> integer \<Rightarrow> bool\<close>
+  is \<open>less_eq :: int \<Rightarrow> int \<Rightarrow> bool\<close>
   .
 
 lemma integer_less_eq_iff:
-  "k \<le> l \<longleftrightarrow> int_of_integer k \<le> int_of_integer l"
+  \<open>k \<le> l \<longleftrightarrow> int_of_integer k \<le> int_of_integer l\<close>
   by (fact less_eq_integer.rep_eq)
 
-lift_definition less_integer :: "integer \<Rightarrow> integer \<Rightarrow> bool"
-  is "less :: int \<Rightarrow> int \<Rightarrow> bool"
+lift_definition less_integer :: \<open>integer \<Rightarrow> integer \<Rightarrow> bool\<close>
+  is \<open>less :: int \<Rightarrow> int \<Rightarrow> bool\<close>
   .
 
 lemma integer_less_iff:
-  "k < l \<longleftrightarrow> int_of_integer k < int_of_integer l"
+  \<open>k < l \<longleftrightarrow> int_of_integer k < int_of_integer l\<close>
   by (fact less_integer.rep_eq)
 
-lift_definition equal_integer :: "integer \<Rightarrow> integer \<Rightarrow> bool"
-  is "HOL.equal :: int \<Rightarrow> int \<Rightarrow> bool"
-  .
-
 instance
-  by standard (transfer, simp add: algebra_simps equal less_le_not_le [symmetric] mult_strict_right_mono linear)+
+  by (standard; transfer)
+    (simp_all add: algebra_simps less_le_not_le [symmetric] mult_strict_right_mono linear)
 
 end
+
+instance integer :: discrete_linordered_semidom
+  by (standard; transfer)
+    (fact less_iff_succ_less_eq)
 
 context
   includes lifting_syntax
@@ -292,7 +305,7 @@ lemma [code]:
   "division_segment (k :: integer) = (if k \<ge> 0 then 1 else - 1)"
   by transfer (simp add: division_segment_int_def)
 
-instance integer :: unique_euclidean_ring_with_nat
+instance integer :: linordered_euclidean_semiring
   by (standard; transfer) (simp_all add: of_nat_div division_segment_int_def)
 
 instantiation integer :: ring_bit_operations
@@ -335,16 +348,17 @@ lift_definition take_bit_integer :: \<open>nat \<Rightarrow> integer \<Rightarro
   is take_bit .
 
 instance by (standard; transfer)
-  (fact bit_eq_rec bits_induct bit_iff_odd push_bit_eq_mult drop_bit_eq_div take_bit_eq_mod
-    bits_div_0 bits_div_by_1 bits_mod_div_trivial even_succ_div_2
-    exp_div_exp_eq div_exp_eq mod_exp_eq mult_exp_mod_exp_eq div_exp_mod_exp_eq
-    even_mask_div_iff even_mult_exp_div_exp_iff
-    bit_and_iff bit_or_iff bit_xor_iff mask_eq_exp_minus_1
-    set_bit_def bit_unset_bit_iff flip_bit_def bit_not_iff_eq minus_eq_not_minus_1)+
+  (fact bit_induct div_by_0 div_by_1 div_0 even_half_succ_eq
+    half_div_exp_eq even_double_div_exp_iff bits_mod_div_trivial
+    bit_iff_odd push_bit_eq_mult drop_bit_eq_div take_bit_eq_mod
+    and_rec or_rec xor_rec mask_eq_exp_minus_1
+    set_bit_eq_or unset_bit_eq_or_xor flip_bit_eq_xor not_eq_complement)+
 
 end
 
-instance integer :: unique_euclidean_semiring_with_bit_operations ..
+
+
+instance integer :: linordered_euclidean_semiring_bit_operations ..
 
 context
   includes bit_operations_syntax
@@ -380,7 +394,7 @@ lemma [code]:
 
 end
 
-instantiation integer :: unique_euclidean_semiring_with_nat_division
+instantiation integer :: linordered_euclidean_semiring_division
 begin
 
 definition divmod_integer :: "num \<Rightarrow> num \<Rightarrow> integer \<times> integer"
@@ -820,7 +834,7 @@ code_printing
     (SML) "IntInf.divMod/ (IntInf.abs _,/ IntInf.abs _)"
     and (OCaml) "!(fun k l ->/ if Z.equal Z.zero l then/ (Z.zero, l) else/ Z.div'_rem/ (Z.abs k)/ (Z.abs l))"
     and (Haskell) "divMod/ (abs _)/ (abs _)"
-    and (Scala) "!((k: BigInt) => (l: BigInt) =>/ if (l == 0)/ (BigInt(0), k) else/ (k.abs '/% l.abs))"
+    and (Scala) "!((k: BigInt) => (l: BigInt) =>/ l == 0 match { case true => (BigInt(0), k) case false => (k.abs '/% l.abs) })"
     and (Eval) "Integer.div'_mod/ (abs _)/ (abs _)"
 | constant "HOL.equal :: integer \<Rightarrow> _ \<Rightarrow> bool" \<rightharpoonup>
     (SML) "!((_ : IntInf.int) = _)"
@@ -1051,10 +1065,10 @@ lemma [code]:
   "division_segment (n::natural) = 1"
   by (simp add: natural_eq_iff)
 
-instance natural :: linordered_semidom
-  by (standard; transfer) simp_all
+instance natural :: discrete_linordered_semidom
+  by (standard; transfer) (simp_all add: Suc_le_eq)
 
-instance natural :: unique_euclidean_semiring_with_nat
+instance natural :: linordered_euclidean_semiring
   by (standard; transfer) simp_all
 
 instantiation natural :: semiring_bit_operations
@@ -1094,15 +1108,15 @@ lift_definition take_bit_natural :: \<open>nat \<Rightarrow> natural \<Rightarro
   is take_bit .
 
 instance by (standard; transfer)
-  (fact bit_eq_rec bits_induct bit_iff_odd push_bit_eq_mult drop_bit_eq_div take_bit_eq_mod
-    bits_div_0 bits_div_by_1 bits_mod_div_trivial even_succ_div_2
-    exp_div_exp_eq div_exp_eq mod_exp_eq mult_exp_mod_exp_eq div_exp_mod_exp_eq
-    even_mask_div_iff even_mult_exp_div_exp_iff bit_and_iff bit_or_iff bit_xor_iff
-    mask_eq_exp_minus_1 set_bit_def bit_unset_bit_iff flip_bit_def)+
+  (fact bit_induct div_by_0 div_by_1 div_0 even_half_succ_eq
+    half_div_exp_eq even_double_div_exp_iff bits_mod_div_trivial
+    bit_iff_odd push_bit_eq_mult drop_bit_eq_div take_bit_eq_mod
+    and_rec or_rec xor_rec mask_eq_exp_minus_1
+    set_bit_eq_or unset_bit_eq_or_xor flip_bit_eq_xor not_eq_complement)+
 
 end
 
-instance natural :: unique_euclidean_semiring_with_bit_operations ..
+instance natural :: linordered_euclidean_semiring_bit_operations ..
 
 context
   includes bit_operations_syntax
@@ -1110,7 +1124,7 @@ begin
 
 lemma [code]:
   \<open>bit m n \<longleftrightarrow> odd (drop_bit n m)\<close>
-  \<open>mask n = 2 ^ n - (1 :: integer)\<close>
+  \<open>mask n = 2 ^ n - (1 :: natural)\<close>
   \<open>set_bit n m = m OR push_bit n 1\<close>
   \<open>flip_bit n m = m XOR push_bit n 1\<close>
   \<open>push_bit n m = m * 2 ^ n\<close>

@@ -11,13 +11,15 @@ sig
   val variant: string -> Proof.context -> string * Proof.context
   type decl = Proof.context -> ML_Lex.token list * ML_Lex.token list
   type decls = Proof.context -> (ML_Lex.token list * ML_Lex.token list) list
-  type antiquotation = Position.range -> Token.src -> Proof.context -> decl * Proof.context
-  val add_antiquotation: binding -> bool -> antiquotation -> theory -> theory
+  type 'a antiquotation = Position.range -> 'a -> Proof.context -> decl * Proof.context
+  val add_antiquotation: binding -> bool -> Token.src antiquotation -> theory -> theory
+  val add_antiquotation_embedded: binding -> Input.source antiquotation -> theory -> theory
   val print_antiquotations: bool -> Proof.context -> unit
   val expand_antiquotes: ML_Lex.token Antiquote.antiquote list ->
     Proof.context -> decl * Proof.context
   val expand_antiquotes_list: ML_Lex.token Antiquote.antiquote list list ->
     Proof.context -> decls * Proof.context
+  val read_antiquotes: Input.source -> Proof.context -> decl * Proof.context
   val eval: ML_Compiler.flags -> Position.T -> ML_Lex.token Antiquote.antiquote list -> unit
   val eval_file: ML_Compiler.flags -> Path.T -> unit
   val eval_source: ML_Compiler.flags -> Input.source -> unit
@@ -61,12 +63,11 @@ type decl =
 
 type decls = Proof.context -> (ML_Lex.token list * ML_Lex.token list) list;
 
-type antiquotation =
-  Position.range -> Token.src -> Proof.context -> decl * Proof.context;
+type 'a antiquotation = Position.range -> 'a -> Proof.context -> decl * Proof.context;
 
 structure Antiquotations = Theory_Data
 (
-  type T = (bool * antiquotation) Name_Space.table;
+  type T = (bool * Token.src antiquotation) Name_Space.table;
   val empty : T = Name_Space.empty_table Markup.ML_antiquotationN;
   fun merge data : T = Name_Space.merge_tables data;
 );
@@ -79,6 +80,11 @@ fun check_antiquotation ctxt =
 fun add_antiquotation name embedded antiquotation thy =
   thy |> Antiquotations.map
     (Name_Space.define (Context.Theory thy) true (name, (embedded, antiquotation)) #> #2);
+
+fun add_antiquotation_embedded name antiquotation =
+  add_antiquotation name true
+    (fn range => fn src => fn ctxt =>
+      antiquotation range (Token.read ctxt Parse.embedded_input src) ctxt);
 
 fun print_antiquotations verbose ctxt =
   Pretty.big_list "ML antiquotations:"
@@ -128,6 +134,8 @@ fun expand_antiquotes_list antss ctxt =
   in (decl', ctxt') end
 
 end;
+
+val read_antiquotes = expand_antiquotes o ML_Lex.read_source;
 
 
 (* evaluation *)
@@ -235,3 +243,4 @@ fun expression pos ants =
 end;
 
 val ML = ML_Context.eval_source (ML_Compiler.verbose true ML_Compiler.flags);
+val ML_command = ML_Context.eval_source ML_Compiler.flags;

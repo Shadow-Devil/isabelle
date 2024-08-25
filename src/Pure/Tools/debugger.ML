@@ -22,17 +22,17 @@ fun output_message kind msg =
   if msg = "" then ()
   else
     Output.protocol_message
-      (Markup.debugger_output (Isabelle_Thread.get_name ()))
+      (Markup.debugger_output (Isabelle_Thread.print (Isabelle_Thread.self ())))
       [[XML.Text (Markup.markup (kind, Markup.serial_properties (serial ())) msg)]];
 
 val writeln_message = output_message Markup.writelnN;
 val warning_message = output_message Markup.warningN;
 val error_message = output_message Markup.errorN;
 
-fun error_wrapper e = e ()
-  handle exn =>
-    if Exn.is_interrupt exn then Exn.reraise exn
-    else error_message (Runtime.exn_message exn);
+fun error_wrapper e =
+  (case Exn.result e () of
+    Exn.Res res => res
+  | Exn.Exn exn => error_message (Runtime.exn_message exn));
 
 
 (* thread input *)
@@ -87,7 +87,8 @@ fun get_debugging () = the_default [] (Thread_Data.get debugging_var);
 val is_debugging = not o null o get_debugging;
 
 fun with_debugging e =
-  Thread_Data.setmp debugging_var (SOME (PolyML.DebuggerInterface.debugState (Thread.self ()))) e ();
+  Thread_Data.setmp debugging_var
+    (SOME (PolyML.DebuggerInterface.debugState (Thread.Thread.self ()))) e ();
 
 fun the_debug_state thread_name index =
   (case get_debugging () of
@@ -110,7 +111,7 @@ fun put_stepping stepping = Thread_Data.put stepping_var (SOME (Stepping steppin
 
 fun is_stepping () =
   let
-    val stack = PolyML.DebuggerInterface.debugState (Thread.self ());
+    val stack = PolyML.DebuggerInterface.debugState (Thread.Thread.self ());
     val Stepping (stepping, depth) = get_stepping ();
   in stepping andalso (depth < 0 orelse length stack <= depth) end;
 
@@ -136,7 +137,7 @@ fun operations SML = if SML then ML_Env.SML_operations else ML_Env.Isabelle_oper
 
 fun evaluate {SML, verbose} =
   ML_Context.eval
-    {environment = environment SML, redirect = false, verbose = verbose,
+    {environment = environment SML, redirect = false, verbose = verbose, catch_all = SML,
       debug = SOME false, writeln = writeln_message, warning = warning_message}
     Position.none;
 
@@ -228,13 +229,13 @@ fun debugger_command thread_name =
 in
 
 fun debugger_loop thread_name =
-  Thread_Attributes.uninterruptible (fn restore_attributes => fn () =>
+  Thread_Attributes.uninterruptible_body (fn run =>
     let
       fun loop () =
         (debugger_state thread_name; if debugger_command thread_name then loop () else ());
-      val result = Exn.capture (restore_attributes with_debugging) loop;
+      val result = Exn.capture (run with_debugging) loop;
       val _ = debugger_state thread_name;
-    in Exn.release result end) ();
+    in Exn.release result end);
 
 end;
 
@@ -250,7 +251,7 @@ val _ =
         (SOME (fn (_, break) =>
           if not (is_debugging ()) andalso (! break orelse is_break () orelse is_stepping ())
           then
-            (case try Isabelle_Thread.get_name () of
+            (case try (Isabelle_Thread.print o Isabelle_Thread.self) () of
               SOME thread_name => debugger_loop thread_name
             | NONE => ())
           else ()))));

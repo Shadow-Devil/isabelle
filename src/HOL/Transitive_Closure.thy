@@ -79,7 +79,7 @@ lemma reflp_on_reflclp[simp]: "reflp_on A R\<^sup>=\<^sup>="
 lemma antisym_on_reflcl[simp]: "antisym_on A (r\<^sup>=) \<longleftrightarrow> antisym_on A r"
   by (simp add: antisym_on_def)
 
-lemma antisymp_on_reflcp[simp]: "antisymp_on A R\<^sup>=\<^sup>= \<longleftrightarrow> antisymp_on A R"
+lemma antisymp_on_reflclp[simp]: "antisymp_on A R\<^sup>=\<^sup>= \<longleftrightarrow> antisymp_on A R"
   by (rule antisym_on_reflcl[to_pred])
 
 lemma trans_on_reflcl[simp]: "trans_on A r \<Longrightarrow> trans_on A (r\<^sup>=)"
@@ -88,11 +88,46 @@ lemma trans_on_reflcl[simp]: "trans_on A r \<Longrightarrow> trans_on A (r\<^sup
 lemma transp_on_reflclp[simp]: "transp_on A R \<Longrightarrow> transp_on A R\<^sup>=\<^sup>="
   by (rule trans_on_reflcl[to_pred])
 
+lemma antisymp_on_reflclp_if_asymp_on:
+  assumes "asymp_on A R"
+  shows "antisymp_on A R\<^sup>=\<^sup>="
+  unfolding antisymp_on_reflclp
+  using antisymp_on_if_asymp_on[OF \<open>asymp_on A R\<close>] .
+
+lemma antisym_on_reflcl_if_asym_on: "asym_on A R \<Longrightarrow> antisym_on A (R\<^sup>=)"
+  using antisymp_on_reflclp_if_asymp_on[to_set] .
+
 lemma reflclp_idemp [simp]: "(P\<^sup>=\<^sup>=)\<^sup>=\<^sup>= = P\<^sup>=\<^sup>="
   by blast
 
 lemma reflclp_ident_if_reflp[simp]: "reflp R \<Longrightarrow> R\<^sup>=\<^sup>= = R"
   by (auto dest: reflpD)
+
+text \<open>The following are special cases of @{thm [source] reflclp_ident_if_reflp},
+but they appear duplicated in multiple, independent theories, which causes name clashes.\<close>
+
+lemma (in preorder) reflclp_less_eq[simp]: "(\<le>)\<^sup>=\<^sup>= = (\<le>)"
+  using reflp_on_le by (simp only: reflclp_ident_if_reflp)
+
+lemma (in preorder) reflclp_greater_eq[simp]: "(\<ge>)\<^sup>=\<^sup>= = (\<ge>)"
+  using reflp_on_ge by (simp only: reflclp_ident_if_reflp)
+
+lemma order_reflclp_if_transp_and_asymp:
+  assumes "transp R" and "asymp R"
+  shows "class.order R\<^sup>=\<^sup>= R"
+proof unfold_locales
+  show "\<And>x y. R x y = (R\<^sup>=\<^sup>= x y \<and> \<not> R\<^sup>=\<^sup>= y x)"
+    using \<open>asymp R\<close> asympD by fastforce
+next
+  show "\<And>x. R\<^sup>=\<^sup>= x x"
+    by simp
+next
+  show "\<And>x y z. R\<^sup>=\<^sup>= x y \<Longrightarrow> R\<^sup>=\<^sup>= y z \<Longrightarrow> R\<^sup>=\<^sup>= x z"
+    using transp_on_reflclp[OF \<open>transp R\<close>, THEN transpD] .
+next
+  show "\<And>x y. R\<^sup>=\<^sup>= x y \<Longrightarrow> R\<^sup>=\<^sup>= y x \<Longrightarrow> x = y"
+    using antisymp_on_reflclp_if_asymp_on[OF \<open>asymp R\<close>, THEN antisympD] .
+qed
 
 
 subsection \<open>Reflexive-transitive closure\<close>
@@ -320,6 +355,36 @@ proof -
   qed
   then show ?thesis by auto
 qed
+
+lemma rtranclp_ident_if_reflp_and_transp:
+  assumes "reflp R" and "transp R"
+  shows "R\<^sup>*\<^sup>* = R"
+proof (intro ext iffI)
+  fix x y
+  show "R\<^sup>*\<^sup>* x y \<Longrightarrow> R x y"
+  proof (induction y rule: rtranclp_induct)
+    case base
+    show ?case
+      using \<open>reflp R\<close>[THEN reflpD] .
+  next
+    case (step y z)
+    thus ?case
+      using \<open>transp R\<close>[THEN transpD, of x y  z] by simp
+  qed
+next
+  fix x y
+  show "R x y \<Longrightarrow> R\<^sup>*\<^sup>* x y"
+    using r_into_rtranclp .
+qed
+
+text \<open>The following are special cases of @{thm [source] rtranclp_ident_if_reflp_and_transp},
+but they appear duplicated in multiple, independent theories, which causes name clashes.\<close>
+
+lemma (in preorder) rtranclp_less_eq[simp]: "(\<le>)\<^sup>*\<^sup>* = (\<le>)"
+  using reflp_on_le transp_on_le by (simp only: rtranclp_ident_if_reflp_and_transp)
+
+lemma (in preorder) rtranclp_greater_eq[simp]: "(\<ge>)\<^sup>*\<^sup>* = (\<ge>)"
+  using reflp_on_ge transp_on_ge by (simp only: rtranclp_ident_if_reflp_and_transp)
 
 
 subsection \<open>Transitive closure\<close>
@@ -735,6 +800,42 @@ lemmas transitive_closurep_trans' [trans] =
 
 declare trancl_into_rtrancl [elim]
 
+lemma tranclp_ident_if_transp:
+  assumes "transp R"
+  shows "R\<^sup>+\<^sup>+ = R"
+proof (intro ext iffI)
+  fix x y
+  show "R\<^sup>+\<^sup>+ x y \<Longrightarrow> R x y"
+  proof (induction y rule: tranclp_induct)
+    case (base y)
+    thus ?case
+      by simp
+  next
+    case (step y z)
+    thus ?case
+      using \<open>transp R\<close>[THEN transpD, of x y  z] by simp
+  qed
+next
+  fix x y
+  show "R x y \<Longrightarrow> R\<^sup>+\<^sup>+ x y"
+    using tranclp.r_into_trancl .
+qed
+
+text \<open>The following are special cases of @{thm [source] tranclp_ident_if_transp},
+but they appear duplicated in multiple, independent theories, which causes name clashes.\<close>
+
+lemma (in preorder) tranclp_less[simp]: "(<)\<^sup>+\<^sup>+ = (<)"
+  using transp_on_less by (simp only: tranclp_ident_if_transp)
+
+lemma (in preorder) tranclp_less_eq[simp]: "(\<le>)\<^sup>+\<^sup>+ = (\<le>)"
+  using transp_on_le by (simp only: tranclp_ident_if_transp)
+
+lemma (in preorder) tranclp_greater[simp]: "(>)\<^sup>+\<^sup>+ = (>)"
+  using transp_on_greater by (simp only: tranclp_ident_if_transp)
+
+lemma (in preorder) tranclp_greater_eq[simp]: "(\<ge>)\<^sup>+\<^sup>+ = (\<ge>)"
+  using transp_on_ge by (simp only: tranclp_ident_if_transp)
+
 subsection \<open>Symmetric closure\<close>
 
 definition symclp :: "('a \<Rightarrow> 'a \<Rightarrow> bool) \<Rightarrow> 'a \<Rightarrow> 'a \<Rightarrow> bool"
@@ -912,6 +1013,87 @@ lemma relpowp_E2:
     (n = 0 \<Longrightarrow> x = z \<Longrightarrow> Q) \<Longrightarrow>
     (\<And>y m. n = Suc m \<Longrightarrow> P x y \<Longrightarrow> (P ^^ m) y z \<Longrightarrow> Q) \<Longrightarrow> Q"
   by (fact relpow_E2 [to_pred])
+
+lemma relpowp_trans[trans]: "(R ^^ i) x y \<Longrightarrow> (R ^^ j) y z \<Longrightarrow> (R ^^ (i + j)) x z"
+proof (induction i arbitrary: x)
+  case 0
+  thus ?case by simp
+next
+  case (Suc i)
+  obtain x' where "R x x'" and "(R ^^ i) x' y"
+    using \<open>(R ^^ Suc i) x y\<close>[THEN relpowp_Suc_D2] by auto
+
+  show "(R ^^ (Suc i + j)) x z"
+    unfolding add_Suc
+  proof (rule relpowp_Suc_I2)
+    show "R x x'"
+      using \<open>R x x'\<close> .
+  next
+    show "(R ^^ (i + j)) x' z"
+      using Suc.IH[OF \<open>(R ^^ i) x' y\<close> \<open>(R ^^ j) y z\<close>] .
+  qed
+qed
+
+lemma relpow_trans[trans]: "(x, y) \<in> R ^^ i \<Longrightarrow> (y, z) \<in> R ^^ j \<Longrightarrow> (x, z) \<in> R ^^ (i + j)"
+  using relpowp_trans[to_set] .
+
+lemma relpowp_left_unique:
+  fixes R :: "'a \<Rightarrow> 'a \<Rightarrow> bool" and n :: nat and x y z :: 'a
+  assumes lunique: "\<And>x y z. R x z \<Longrightarrow> R y z \<Longrightarrow> x = y"
+  shows "(R ^^ n) x z \<Longrightarrow> (R ^^ n) y z \<Longrightarrow> x = y"
+proof (induction n arbitrary: x y z)
+  case 0
+  thus ?case
+    by simp
+next
+  case (Suc n')
+  then obtain x' y' :: 'a where
+    "(R ^^ n') x x'" and "R x' z" and
+    "(R ^^ n') y y'" and "R y' z"
+    by auto
+
+  have "x' = y'"
+    using lunique[OF \<open>R x' z\<close> \<open>R y' z\<close>] .
+
+  show "x = y"
+  proof (rule Suc.IH)
+    show "(R ^^ n') x x'"
+      using \<open>(R ^^ n') x x'\<close> .
+  next
+    show "(R ^^ n') y x'"
+      using \<open>(R ^^ n') y y'\<close>
+      unfolding \<open>x' = y'\<close> .
+  qed
+qed
+
+lemma relpow_left_unique:
+  fixes R :: "('a \<times> 'a) set" and n :: nat and x y z :: 'a
+  shows "(\<And>x y z. (x, z) \<in> R \<Longrightarrow> (y, z) \<in> R \<Longrightarrow> x = y) \<Longrightarrow>
+    (x, z) \<in> R ^^ n \<Longrightarrow> (y, z) \<in> R ^^ n \<Longrightarrow> x = y"
+  using relpowp_left_unique[to_set] .
+
+lemma relpowp_right_unique:
+  fixes R :: "'a \<Rightarrow> 'a \<Rightarrow> bool" and n :: nat and x y z :: 'a
+  assumes runique: "\<And>x y z. R x y \<Longrightarrow> R x z \<Longrightarrow> y = z"
+  shows "(R ^^ n) x y \<Longrightarrow> (R ^^ n) x z \<Longrightarrow> y = z"
+proof (induction n arbitrary: x y z)
+  case 0
+  thus ?case
+    by simp
+next
+  case (Suc n')
+  then obtain x' :: 'a where
+    "(R ^^ n') x x'" and "R x' y" and "R x' z"
+    by auto
+  thus "y = z"
+    using runique by simp
+qed
+
+lemma relpow_right_unique:
+  fixes R :: "('a \<times> 'a) set" and n :: nat and x y z :: 'a
+  shows "(\<And>x y z. (x, y) \<in> R \<Longrightarrow> (x, z) \<in> R \<Longrightarrow> y = z) \<Longrightarrow>
+    (x, y) \<in> (R ^^ n) \<Longrightarrow> (x, z) \<in> (R ^^ n) \<Longrightarrow> y = z"
+  using relpowp_right_unique[to_set] .
 
 lemma relpow_add: "R ^^ (m + n) = R^^m O R^^n"
   by (induct n) auto

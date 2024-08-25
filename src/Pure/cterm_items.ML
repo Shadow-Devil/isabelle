@@ -2,7 +2,7 @@
     Author:     Makarius
 
 Scalable collections of term items: for type thm and cterm.
-See als Pure/term_items.ML.
+See also Pure/term_items.ML.
 *)
 
 structure Ctermtab:
@@ -33,7 +33,7 @@ struct
 structure Term_Items = Term_Items
 (
   type key = cterm;
-  val ord = Thm.fast_term_ord
+  val ord = Thm.fast_term_ord;
 );
 open Term_Items;
 

@@ -3,7 +3,7 @@
 
 Support for SQL databases: SQLite and PostgreSQL.
 
-See https://docs.oracle.com/en/java/javase/17/docs/api/java.sql/java/sql/Connection.html
+See https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/Connection.html
 */
 
 package isabelle
@@ -12,8 +12,9 @@ package isabelle
 import java.time.OffsetDateTime
 import java.sql.{DriverManager, Connection, PreparedStatement, ResultSet, SQLException}
 
+import org.sqlite.SQLiteConfig
 import org.sqlite.jdbc4.JDBC4Connection
-import org.postgresql.{PGConnection, PGNotification}
+import org.postgresql.PGConnection
 
 import scala.collection.mutable
 
@@ -28,22 +29,18 @@ object SQL {
 
   /* concrete syntax */
 
-  def escape_char(c: Char): String =
-    c match {
-      case '\u0000' => "\\0"
-      case '\'' => "\\'"
-      case '\"' => "\\\""
-      case '\b' => "\\b"
-      case '\n' => "\\n"
-      case '\r' => "\\r"
-      case '\t' => "\\t"
-      case '\u001a' => "\\Z"
-      case '\\' => "\\\\"
-      case _ => c.toString
+  def string(s: String): Source = {
+    val q = '\''
+    val result = new StringBuilder(s.length + 10)
+    result += q
+    for (c <- s.iterator) {
+      if (c == '\u0000') error("Illegal NUL character in SQL string literal")
+      if (c == q) result += q
+      result += c
     }
-
-  def string(s: String): Source =
-    s.iterator.map(escape_char).mkString("'", "", "'")
+    result += q
+    result.toString
+  }
 
   def ident(s: String): Source =
     Long_Name.implode(Long_Name.explode(s).map(a => quote(a.replace("\"", "\"\""))))
@@ -52,15 +49,14 @@ object SQL {
   def enclosure(ss: Iterable[Source]): Source = ss.mkString("(", ", ", ")")
 
   def separate(sql: Source): Source =
-    (if (sql.isEmpty || sql.startsWith(" ")) "" else " ") + sql
+    if_proper(sql.nonEmpty && sql(0) != ' ', " ") + sql
 
   def select(columns: List[Column] = Nil, distinct: Boolean = false, sql: Source = ""): Source =
-    "SELECT " + (if (distinct) "DISTINCT " else "") +
+    "SELECT " + if_proper(distinct, "DISTINCT ") +
     (if (columns.isEmpty) "*" else commas(columns.map(_.ident))) + " FROM " + sql
 
   val join_outer: Source = " LEFT OUTER JOIN "
   val join_inner: Source = " INNER JOIN "
-  def join(outer: Boolean): Source = if (outer) join_outer else join_inner
 
   def MULTI(args: Iterable[Source]): Source =
     args.iterator.filter(_.nonEmpty).mkString(";\n")
@@ -84,9 +80,12 @@ object SQL {
   def equal(sql: Source, x: Long): Source = sql + " = " + x
   def equal(sql: Source, x: String): Source = sql + " = " + string(x)
 
+  def member_int(sql: Source, set: Iterable[Int]): Source =
+    if (set.isEmpty) FALSE else OR(set.iterator.map(equal(sql, _)).toList)
+  def member_long(sql: Source, set: Iterable[Long]): Source =
+    if (set.isEmpty) FALSE else OR(set.iterator.map(equal(sql, _)).toList)
   def member(sql: Source, set: Iterable[String]): Source =
-    if (set.isEmpty) FALSE
-    else OR(set.iterator.map(equal(sql, _)).toList)
+    if (set.isEmpty) FALSE else OR(set.iterator.map(equal(sql, _)).toList)
 
   def where(sql: Source): Source = if_proper(sql, " WHERE " + sql)
   def where_and(args: Source*): Source = where(and(args:_*))
@@ -95,26 +94,26 @@ object SQL {
 
   /* types */
 
-  object Type extends Enumeration {
-    val Boolean = Value("BOOLEAN")
-    val Int = Value("INTEGER")
-    val Long = Value("BIGINT")
-    val Double = Value("DOUBLE PRECISION")
-    val String = Value("TEXT")
-    val Bytes = Value("BLOB")
-    val Date = Value("TIMESTAMP WITH TIME ZONE")
-  }
+  enum Type { case Boolean, Int, Long, Double, String, Bytes, Date }
 
-  def sql_type_default(T: Type.Value): Source = T.toString
+  val sql_type_postgresql: Type => Source =
+    {
+      case Type.Boolean => "BOOLEAN"
+      case Type.Int => "INTEGER"
+      case Type.Long => "BIGINT"
+      case Type.Double => "DOUBLE PRECISION"
+      case Type.String => "TEXT"
+      case Type.Bytes => "BYTEA"
+      case Type.Date => "TIMESTAMP WITH TIME ZONE"
+    }
 
-  def sql_type_sqlite(T: Type.Value): Source =
-    if (T == Type.Boolean) "INTEGER"
-    else if (T == Type.Date) "TEXT"
-    else sql_type_default(T)
-
-  def sql_type_postgresql(T: Type.Value): Source =
-    if (T == Type.Bytes) "BYTEA"
-    else sql_type_default(T)
+  val sql_type_sqlite: Type => Source =
+    {
+      case Type.Boolean => "INTEGER"
+      case Type.Bytes => "BLOB"
+      case Type.Date => "TEXT"
+      case t => sql_type_postgresql(t)
+    }
 
 
   /* columns */
@@ -138,22 +137,23 @@ object SQL {
 
   sealed case class Column(
     name: String,
-    T: Type.Value,
+    T: Type,
     strict: Boolean = false,
     primary_key: Boolean = false,
     expr: SQL.Source = ""
   ) {
+    def equals_name(other: Column): Boolean = name == other.name
+
     def make_primary_key: Column = copy(primary_key = true)
 
     def apply(table: Table): Column =
       Column(Long_Name.qualify(table.name, name), T, strict = strict, primary_key = primary_key)
 
     def ident: Source =
-      if (expr == "") SQL.ident(name)
-      else enclose(expr) + " AS " + SQL.ident(name)
+      if_proper(expr, enclose(expr) + " AS ") + SQL.ident(name)
 
-    def decl(sql_type: Type.Value => Source): Source =
-      ident + " " + sql_type(T) + (if (strict || primary_key) " NOT NULL" else "")
+    def decl(sql_type: Type => Source): Source =
+      ident + " " + sql_type(T) + if_proper(strict || primary_key, " NOT NULL")
 
     def defined: String = ident + " IS NOT NULL"
     def undefined: String = ident + " IS NULL"
@@ -166,16 +166,22 @@ object SQL {
     def where_equal(x: Long): Source = SQL.where(equal(x))
     def where_equal(x: String): Source = SQL.where(equal(x))
 
+    def member_int(set: Iterable[Int]): Source = SQL.member_int(ident, set)
+    def member_long(set: Iterable[Long]): Source = SQL.member_long(ident, set)
     def member(set: Iterable[String]): Source = SQL.member(ident, set)
+
+    def where_member_int(set: Iterable[Int]): Source = SQL.where(member_int(set))
+    def where_member_long(set: Iterable[Long]): Source = SQL.where(member_long(set))
     def where_member(set: Iterable[String]): Source = SQL.where(member(set))
 
-    def max: Column = copy(expr = "MAX(" + ident + ")")
+    def make_expr(e: SQL.Source): Column = copy(expr = e)
+    def max: Column = make_expr("MAX(" + ident + ")")
 
     override def toString: Source = ident
   }
 
   def order_by(columns: List[Column], descending: Boolean = false): Source =
-    " ORDER BY " + columns.mkString(", ") + (if (descending) " DESC" else "")
+    " ORDER BY " + columns.mkString(", ") + if_proper(descending, " DESC")
 
 
   /* tables */
@@ -194,7 +200,7 @@ object SQL {
 
     def query_named: Source = query + " AS " + SQL.ident(name)
 
-    def create(sql_type: Type.Value => Source): Source = {
+    def create(sql_type: Type => Source): Source = {
       val primary_key =
         columns.filter(_.primary_key).map(_.name) match {
           case Nil => Nil
@@ -237,6 +243,11 @@ object SQL {
 
     def iterator: Iterator[Table] = list.iterator
 
+    def index(table: Table): Int =
+      iterator.zipWithIndex
+        .collectFirst({ case (t, i) if t.name == table.name => i })
+        .getOrElse(error("No table " + quote(table.name)))
+
     // requires transaction
     def lock(db: Database, create: Boolean = false): Boolean = {
       if (create) foreach(db.create_table(_))
@@ -246,6 +257,12 @@ object SQL {
     }
   }
 
+
+  /* access data */
+
+  def transaction_logger(): Logger =
+    new System_Logger(guard_time = Time.guard_property("isabelle.transaction_trace"))
+
   abstract class Data(table_prefix: String = "") {
     def tables: Tables
 
@@ -253,7 +270,7 @@ object SQL {
       db: Database,
       create: Boolean = false,
       label: String = "",
-      log: Logger = new System_Logger
+      log: Logger = transaction_logger()
     )(body: => A): A = {
       db.transaction_lock(tables, create = create, label = label, log = log)(body)
     }
@@ -386,6 +403,14 @@ object SQL {
   }
 
 
+  /* notifications: IPC via database server */
+
+  sealed case class Notification(channel: String, payload: String = "") {
+    override def toString: String =
+      "Notification(" + channel + if_proper(payload, "," + payload) + ")"
+  }
+
+
   /* database */
 
   trait Database extends AutoCloseable {
@@ -407,7 +432,7 @@ object SQL {
 
     /* types */
 
-    def sql_type(T: Type.Value): Source
+    def sql_type(T: Type): Source
 
 
     /* connection */
@@ -463,24 +488,15 @@ object SQL {
       tables: Tables,
       create: Boolean = false,
       label: String = "",
-      log: Logger = new System_Logger
+      log: Logger = transaction_logger()
     )(body: => A): A = {
-      val prop = "isabelle.transaction_trace"
-      val trace_min =
-        System.getProperty(prop, "") match {
-          case Value.Seconds(t) => t
-          case "true" => Time.min
-          case "false" | "" => Time.max
-          case s => error("Bad system property " + prop + ": " + quote(s))
-        }
-
       val trace_count = - SQL.transaction_count()
       val trace_start = Time.now()
       var trace_nl = false
 
       def trace(msg: String): Unit = {
         val trace_time = Time.now() - trace_start
-        if (trace_time >= trace_min) {
+        if (log.guard(trace_time)) {
           time_start
           val nl =
             if (trace_nl) ""
@@ -547,8 +563,16 @@ object SQL {
 
     def insert_permissive(table: Table, sql: Source = ""): Source
 
+    def destroy(table: Table): Source = "DROP TABLE IF EXISTS " + table
+
 
     /* tables and views */
+
+    def name_pattern(name: String): String = {
+      val escape = connection.getMetaData.getSearchStringEscape
+      name.iterator.map(c =>
+        if_proper(c == '_' || c == '%' || c == escape(0), escape) + c).mkString
+    }
 
     def get_tables(pattern: String = "%"): List[String] = {
       val result = new mutable.ListBuffer[String]
@@ -557,15 +581,27 @@ object SQL {
       result.toList
     }
 
-    def exists_table(name: String): Boolean = {
-      val escape = connection.getMetaData.getSearchStringEscape
-      val pattern =
-        name.iterator.map(c =>
-          (if (c == '_' || c == '%' || c == escape(0)) escape else "") + c).mkString
-      get_tables(pattern = pattern).nonEmpty
+    def get_table_columns(
+      table_pattern: String = "%",
+      pattern: String = "%"
+    ): List[(String, String)] = {
+      val result = new mutable.ListBuffer[(String, String)]
+      val rs = connection.getMetaData.getColumns(null, null, table_pattern, pattern)
+      while (rs.next) { result += (rs.getString(3) -> rs.getString(4)) }
+      result.toList
     }
 
+    def exists_table(name: String): Boolean =
+      get_tables(pattern = name_pattern(name)).nonEmpty
+
     def exists_table(table: Table): Boolean = exists_table(table.name)
+
+    def exists_table_column(table_name: String, name: String): Boolean =
+      get_table_columns(table_pattern = name_pattern(table_name), pattern = name_pattern(name))
+        .nonEmpty
+
+    def exists_table_column(table: Table, column: Column): Boolean =
+      exists_table_column(table.name, column.name)
 
     def create_table(table: Table, sql: Source = ""): Unit = {
       if (!exists_table(table)) {
@@ -584,6 +620,17 @@ object SQL {
         execute_statement("CREATE VIEW " + table + " AS " + { table.query; table.body })
       }
     }
+
+
+    /* notifications (PostgreSQL only) */
+
+    def listen(channel: String): Unit = ()
+    def unlisten(channel: String = "*"): Unit = ()
+    def send(channel: String, payload: String): Unit = ()
+    final def send(channel: String): Unit = send(channel, "")
+    final def send(notification: Notification): Unit =
+      send(notification.channel, notification.payload)
+    def receive(filter: Notification => Boolean): Option[List[Notification]] = None
   }
 
 
@@ -613,7 +660,11 @@ object SQLite {
     val path0 = path.expand
     val s0 = File.platform_path(path0)
     val s1 = if (Platform.is_windows) s0.replace('\\', '/') else s0
-    val connection = DriverManager.getConnection("jdbc:sqlite:" + s1)
+
+    val config = new SQLiteConfig()
+    config.setEncoding(SQLiteConfig.Encoding.UTF8)
+    val connection = config.createConnection("jdbc:sqlite:" + s1)
+
     val db = new Database(path0.toString, connection)
 
     try { if (restrict) File.restrict(path0) }
@@ -627,7 +678,7 @@ object SQLite {
 
     override def now(): Date = Date.now()
 
-    def sql_type(T: SQL.Type.Value): SQL.Source = SQL.sql_type_sqlite(T)
+    def sql_type(T: SQL.Type): SQL.Source = SQL.sql_type_sqlite(T)
 
     def update_date(stmt: SQL.Statement, i: Int, date: Date): Unit =
       if (date == null) stmt.string(i) = (null: String)
@@ -648,7 +699,7 @@ object SQLite {
 
 /** PostgreSQL **/
 
-// see https://www.postgresql.org/docs/current/index.html
+// see https://www.postgresql.org/docs/14/index.html
 // see https://jdbc.postgresql.org/documentation
 
 object PostgreSQL {
@@ -664,7 +715,7 @@ object PostgreSQL {
     database: String = "",
     server: SSH.Server = default_server,
     server_close: Boolean = false,
-    synchronous_commit: String = "off"
+    receiver_delay: Time = Time.seconds(0.5)
   ): Database = {
     init_jdbc
 
@@ -680,13 +731,9 @@ object PostgreSQL {
         if_proper(ssh, " via ssh " + quote(ssh.get.toString))
 
     val connection = DriverManager.getConnection(url, user, password)
-    val db = new Database(connection, print, server, server_close)
+    val db = new Database(connection, print, server, server_close, receiver_delay)
 
-    try {
-      if (synchronous_commit.nonEmpty) {
-        db.execute_statement("SET synchronous_commit = " + SQL.string(synchronous_commit))
-      }
-    }
+    try { db.execute_statement("SET standard_conforming_strings = on") }
     catch { case exn: Throwable => db.close(); throw exn }
 
     db
@@ -720,8 +767,7 @@ object PostgreSQL {
     port: Int = 0,
     ssh_host: String = "",
     ssh_port: Int = 0,
-    ssh_user: String = "",
-    synchronous_commit: String = ""
+    ssh_user: String = ""
   ): PostgreSQL.Database = {
     val db_server =
       if (server.defined) server
@@ -732,7 +778,7 @@ object PostgreSQL {
     val server_close = !server.defined
     try {
       open_database(user = user, password = password, database = database,
-        server = db_server, server_close = server_close, synchronous_commit = synchronous_commit)
+        server = db_server, server_close = server_close)
     }
     catch { case exn: Throwable if server_close => db_server.close(); throw exn }
   }
@@ -741,7 +787,8 @@ object PostgreSQL {
     val connection: Connection,
     print: String,
     server: SSH.Server,
-    server_close: Boolean
+    server_close: Boolean,
+    receiver_delay: Time
   ) extends SQL.Database {
     override def toString: String = print
 
@@ -751,7 +798,7 @@ object PostgreSQL {
         .getOrElse(error("Failed to get current date/time from database server " + toString))
     }
 
-    def sql_type(T: SQL.Type.Value): SQL.Source = SQL.sql_type_postgresql(T)
+    def sql_type(T: SQL.Type): SQL.Source = SQL.sql_type_postgresql(T)
 
     // see https://jdbc.postgresql.org/documentation/head/8-date-time.html
     def update_date(stmt: SQL.Statement, i: Int, date: Date): Unit =
@@ -766,34 +813,102 @@ object PostgreSQL {
     def insert_permissive(table: SQL.Table, sql: SQL.Source = ""): SQL.Source =
       table.insert_cmd(sql = if_proper(sql, sql + " ") + "ON CONFLICT DO NOTHING")
 
+    override def destroy(table: SQL.Table): SQL.Source =
+      super.destroy(table) + " CASCADE"
+
 
     /* explicit locking: only applicable to PostgreSQL within transaction context */
-    // see https://www.postgresql.org/docs/current/sql-lock.html
-    // see https://www.postgresql.org/docs/current/explicit-locking.html
+    // see https://www.postgresql.org/docs/14/sql-lock.html
+    // see https://www.postgresql.org/docs/14/explicit-locking.html
 
     override def lock_tables(tables: List[SQL.Table]): PostgreSQL.Source =
       if_proper(tables, "LOCK TABLE " + tables.mkString(", ") + " IN ACCESS EXCLUSIVE MODE")
 
 
     /* notifications: IPC via database server */
-    // see https://www.postgresql.org/docs/current/sql-notify.html
+    /*
+      - see https://www.postgresql.org/docs/14/sql-notify.html
+      - self-notifications and repeated notifications are suppressed
+      - notifications are sorted by local system time (nano seconds)
+      - receive() == None means that IPC is inactive or unavailable (SQLite)
+    */
 
-    def listen(name: String): Unit =
-      execute_statement("LISTEN " + SQL.ident(name))
+    private var _receiver_buffer: Option[Map[SQL.Notification, Long]] = None
 
-    def unlisten(name: String = "*"): Unit =
-      execute_statement("UNLISTEN " + (if (name == "*") name else SQL.ident(name)))
+    private lazy val _receiver_thread =
+      Isabelle_Thread.fork(name = "PostgreSQL.receiver", daemon = true, uninterruptible = true) {
+        val conn = the_postgresql_connection
+        val self_pid = conn.getBackendPID
 
-    def notify(name: String, payload: String = ""): Unit =
-      execute_statement("NOTIFY " + SQL.ident(name) + if_proper(payload, ", " + SQL.string(payload)))
-
-    def get_notifications(): List[PGNotification] =
-      the_postgresql_connection.getNotifications() match {
-        case null => Nil
-        case array => array.toList
+        try {
+          while (true) {
+            Isabelle_Thread.interruptible { receiver_delay.sleep(); Option(conn.getNotifications())}
+            match {
+              case Some(array) if array.nonEmpty =>
+                synchronized {
+                  var received = _receiver_buffer.getOrElse(Map.empty)
+                  for (a <- array.iterator if a.getPID != self_pid) {
+                    val msg = SQL.Notification(a.getName, a.getParameter)
+                    if (!received.isDefinedAt(msg)) {
+                      val stamp = System.nanoTime()
+                      received = received + (msg -> stamp)
+                    }
+                  }
+                  _receiver_buffer = Some(received)
+                }
+              case _ =>
+            }
+          }
+        }
+        catch { case Exn.Interrupt() => }
       }
 
+    private def receiver_shutdown(): Unit = synchronized {
+      if (_receiver_buffer.isDefined) {
+        _receiver_thread.interrupt()
+        Some(_receiver_thread)
+      }
+      else None
+    }.foreach(_.join())
 
-    override def close(): Unit = { super.close(); if (server_close) server.close() }
+    private def synchronized_receiver[A](body: => A): A = synchronized {
+      if (_receiver_buffer.isEmpty) {
+        _receiver_buffer = Some(Map.empty)
+        _receiver_thread
+      }
+      body
+    }
+
+    override def listen(channel: String): Unit = synchronized_receiver {
+      execute_statement("LISTEN " + SQL.ident(channel))
+    }
+
+    override def unlisten(channel: String = "*"): Unit = synchronized_receiver {
+      execute_statement("UNLISTEN " + (if (channel == "*") channel else SQL.ident(channel)))
+    }
+
+    override def send(channel: String, payload: String): Unit = synchronized_receiver {
+      execute_statement(
+        "NOTIFY " + SQL.ident(channel) + if_proper(payload, ", " + SQL.string(payload)))
+    }
+
+    override def receive(
+      filter: SQL.Notification => Boolean = _ => true
+    ): Option[List[SQL.Notification]] = synchronized {
+      _receiver_buffer.map { received =>
+        val filtered = received.keysIterator.filter(filter).toList
+        if (filtered.nonEmpty) {
+          _receiver_buffer = Some(received -- filtered)
+          filtered.map(msg => msg -> received(msg)).sortBy(_._2).map(_._1)
+        }
+        else Nil
+      }
+    }
+
+    override def close(): Unit = {
+      receiver_shutdown()
+      super.close()
+      if (server_close) server.close()
+    }
   }
 }

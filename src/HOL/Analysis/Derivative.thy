@@ -1116,7 +1116,7 @@ proof -
         have "norm (g z - g y) < d0"
           by (metis as cancel_comm_monoid_add_class.diff_cancel d(2) \<open>0 < d0\<close> d1 diff_gt_0_iff_gt diff_strict_mono dist_norm dist_self zero_less_dist_iff)
         then show ?thesis
-          by (metis C(1) \<open>y \<in> T\<close> d0 fg mult_le_cancel_iff1)
+          by (metis C(1) \<open>y \<in> T\<close> d0 fg mult_le_cancel_right_pos)
       qed
       also have "\<dots> \<le> e * norm (g z - g y)"
         using C by (auto simp add: field_simps)
@@ -2403,6 +2403,12 @@ lemma deriv_sum [simp]:
   unfolding DERIV_deriv_iff_field_differentiable[symmetric]
   by (auto intro!: DERIV_imp_deriv derivative_intros)
 
+lemma deriv_compose_linear':
+  assumes "f field_differentiable at (c*z + a)"
+  shows "deriv (\<lambda>w. f (c*w + a)) z = c * deriv f (c*z + a)"
+  apply (subst deriv_chain [where f="\<lambda>w. c*w + a",unfolded comp_def])
+  using assms by (auto intro: derivative_intros)
+
 lemma deriv_compose_linear:
   assumes "f field_differentiable at (c * z)"
   shows "deriv (\<lambda>w. f (c * w)) z = c * deriv f (c * z)"
@@ -2412,7 +2418,6 @@ proof -
   then show ?thesis
     by simp
 qed
-
 
 lemma nonzero_deriv_nonconstant:
   assumes df: "DERIV f \<xi> :> df" and S: "open S" "\<xi> \<in> S" and "df \<noteq> 0"

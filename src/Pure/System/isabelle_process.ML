@@ -154,14 +154,20 @@ fun init_protocol modes = Thread_Attributes.uninterruptible (fn _ => fn (address
 
     fun protocol_loop () =
       let
-        val _ =
+        fun main () =
           (case Byte_Message.read_message in_stream of
             NONE => raise Protocol_Command.STOP 0
           | SOME [] => Output.system_message "Isabelle process: no input"
-          | SOME (name :: args) => Protocol_Command.run (Bytes.content name) args)
-          handle exn =>
-            if Protocol_Command.is_protocol_exn exn then Exn.reraise exn
-            else (Runtime.exn_system_message exn handle crash => recover crash);
+          | SOME (name :: args) => Protocol_Command.run (Bytes.content name) args);
+        val _ =
+          (case Exn.capture_body main of
+            Exn.Res () => ()
+          | Exn.Exn exn =>
+              if Protocol_Command.is_protocol_exn exn then Exn.reraise exn
+              else
+                (case Exn.capture Runtime.exn_system_message exn of
+                  Exn.Res () => ()
+                | Exn.Exn crash => recover crash));
       in protocol_loop () end;
 
     fun protocol () =
@@ -169,7 +175,7 @@ fun init_protocol modes = Thread_Attributes.uninterruptible (fn _ => fn (address
       ml_statistics ();
       protocol_loop ());
 
-    val result = Exn.capture (message_context protocol) ();
+    val result = Exn.capture_body (message_context protocol);
 
 
     (* shutdown *)
@@ -197,18 +203,21 @@ fun init_options () =
   Multithreading.trace := Options.default_int "threads_trace";
   Multithreading.max_threads_update (Options.default_int "threads");
   Multithreading.parallel_proofs := Options.default_int "parallel_proofs";
+  Isabelle_Thread.threads_stack_limit := Options.default_real "threads_stack_limit";
   if Options.default_bool "export_standard_proofs" then Proofterm.proofs := 2 else ();
   let val proofs = Options.default_int "record_proofs"
   in if proofs < 0 then () else Proofterm.proofs := proofs end;
   Printer.show_markup_default := false;
   Context.theory_tracing := Options.default_bool "context_theory_tracing";
   Context.proof_tracing := Options.default_bool "context_proof_tracing";
-  Context.data_timing := Options.default_bool "context_data_timing");
+  Context.data_timing := Options.default_bool "context_data_timing";
+  Syntax.cache_persistent := false);
 
 fun init_options_interactive () =
  (init_options ();
   Multithreading.parallel_proofs := (if Options.default_int "parallel_proofs" > 0 then 3 else 0);
-  Printer.show_markup_default := true);
+  Printer.show_markup_default := true;
+  Syntax.cache_persistent := true);
 
 
 (* generic init *)

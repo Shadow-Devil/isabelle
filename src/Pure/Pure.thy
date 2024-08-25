@@ -7,8 +7,8 @@ The Pure theory, with definitions of Isar commands and some lemmas.
 theory Pure
 keywords
     "!!" "!" "+" ":" ";" "<" "<=" "==" "=>" "?" "[" "\<comment>" "\<equiv>" "\<leftharpoondown>" "\<rightharpoonup>" "\<rightleftharpoons>"
-    "\<subseteq>" "]" "binder" "by" "in" "infix" "infixl" "infixr" "is" "open" "output"
-    "overloaded" "pervasive" "premises" "structure" "unchecked"
+    "\<subseteq>" "]" "binder" "by" "identifier" "in" "infix" "infixl" "infixr" "is" "open" "output"
+    "overloaded" "passive" "pervasive" "premises" "structure" "unchecked"
   and "private" "qualified" :: before_command
   and "assumes" "constrains" "defines" "fixes" "for" "if" "includes" "notes" "rewrites"
     "obtains" "shows" "when" "where" "|" :: quasi_command
@@ -246,7 +246,7 @@ val _ =
     (Parse.ML_source >> (fn source =>
       let
         val flags: ML_Compiler.flags =
-          {environment = ML_Env.SML_export, redirect = false, verbose = true,
+          {environment = ML_Env.SML_export, redirect = false, verbose = true, catch_all = true,
             debug = NONE, writeln = writeln, warning = warning};
       in
         Toplevel.theory
@@ -258,7 +258,7 @@ val _ =
     (Parse.ML_source >> (fn source =>
       let
         val flags: ML_Compiler.flags =
-          {environment = ML_Env.SML_import, redirect = false, verbose = true,
+          {environment = ML_Env.SML_import, redirect = false, verbose = true, catch_all = true,
             debug = NONE, writeln = writeln, warning = warning};
       in
         Toplevel.generic_theory
@@ -333,9 +333,7 @@ val _ =
 
 val _ =
   Outer_Syntax.local_theory \<^command_keyword>\<open>simproc_setup\<close> "define simproc in ML"
-    (Parse.name_position --
-      (\<^keyword>\<open>(\<close> |-- Parse.enum1 "|" Parse.term --| \<^keyword>\<open>)\<close> --| \<^keyword>\<open>=\<close>) --
-      Parse.ML_source >> (fn ((a, b), c) => Isar_Cmd.simproc_setup a b c));
+    Simplifier.simproc_setup_command;
 
 in end\<close>
 
@@ -1557,5 +1555,8 @@ next
 qed
 
 declare [[ML_write_global = false]]
+
+ML_command \<open>\<^assert> (not (can ML_command \<open>() handle _ => ()\<close>))\<close>
+ML_command \<open>\<^assert> (not (can ML_command \<open>() handle Interrupt => ()\<close>))\<close>
 
 end

@@ -9,7 +9,7 @@ package isabelle
 
 import java.io.{File => JFile}
 import java.nio.file.Files
-import java.net.{InetSocketAddress, URI, URL, HttpURLConnection}
+import java.net.{InetSocketAddress, URI, HttpURLConnection}
 import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
 
 
@@ -63,11 +63,11 @@ object HTTP {
     val default_timeout: Time = Time.seconds(180)
 
     def open_connection(
-      url: URL,
+      url: Url,
       timeout: Time = default_timeout,
       user_agent: String = ""
     ): HttpURLConnection = {
-      url.openConnection match {
+      url.open_connection() match {
         case connection: HttpURLConnection =>
           if (0 < timeout.ms && timeout.ms <= Int.MaxValue) {
             val ms = timeout.ms.toInt
@@ -88,7 +88,7 @@ object HTTP {
         val bytes = Bytes.read_stream(stream, hint = connection.getContentLength)
         val stop = Time.now()
 
-        val file_name = Url.file_name(connection.getURL)
+        val file_name = Url.file_name(Url(connection.getURL.toURI))
         val mime_type = Option(connection.getContentType).getOrElse(Content.default_mime_type)
         val encoding =
           (connection.getContentEncoding, mime_type) match {
@@ -101,11 +101,11 @@ object HTTP {
       }
     }
 
-    def get(url: URL, timeout: Time = default_timeout, user_agent: String = ""): Content =
+    def get(url: Url, timeout: Time = default_timeout, user_agent: String = ""): Content =
       get_content(open_connection(url, timeout = timeout, user_agent = user_agent))
 
     def post(
-      url: URL,
+      url: Url,
       parameters: List[(String, Any)],
       timeout: Time = default_timeout,
       user_agent: String = ""
@@ -114,7 +114,7 @@ object HTTP {
       connection.setRequestMethod("POST")
       connection.setDoOutput(true)
 
-      val boundary = UUID.random().toString
+      val boundary = UUID.random_string()
       connection.setRequestProperty(
         "Content-Type", "multipart/form-data; boundary=" + quote(boundary))
 
@@ -243,7 +243,7 @@ object HTTP {
       val input = using(http.getRequestBody)(Bytes.read_stream(_))
       if (http.getRequestMethod == method) {
         val request = new Request(server_name, name, uri, input)
-        Exn.capture(apply(request)) match {
+        Exn.result(apply(request)) match {
           case Exn.Res(Some(response)) =>
             response.write(http, 200)
           case Exn.Res(None) =>
@@ -277,7 +277,7 @@ object HTTP {
 
   def server(
     port: Int = 0,
-    name: String = UUID.random().toString,
+    name: String = UUID.random_string(),
     services: List[Service] = isabelle_services
   ): Server = {
     val http_server = HttpServer.create(new InetSocketAddress(isabelle.Server.localhost, port), 0)

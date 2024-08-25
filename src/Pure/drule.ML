@@ -337,10 +337,10 @@ val size_of_thm = size_of_term o Thm.full_prop_of;
 val read_prop = certify o Simple_Syntax.read_prop;
 
 fun store_thm name th =
-  Context.>>> (Context.map_theory_result (Global_Theory.store_thm (name, th)));
+  Theory.setup_result (Global_Theory.store_thm (name, th));
 
 fun store_thm_open name th =
-  Context.>>> (Context.map_theory_result (Global_Theory.store_thm_open (name, th)));
+  Theory.setup_result (Global_Theory.store_thm_open (name, th));
 
 fun store_standard_thm name th = store_thm name (export_without_context th);
 fun store_standard_thm_open name th = store_thm_open name (export_without_context_open th);
@@ -759,10 +759,10 @@ fun infer_instantiate_types _ [] th = th
                 in
                   raise THM ("infer_instantiate_types: type " ^
                     Syntax.string_of_typ ctxt (Envir.norm_type tyenv T) ^ " of variable " ^
-                    Syntax.string_of_term ctxt (Term.map_types (Envir.norm_type tyenv) t) ^
+                    Syntax.string_of_term ctxt (Term.map_types (Envir.norm_type_same tyenv) t) ^
                     "\ncannot be unified with type " ^
                     Syntax.string_of_typ ctxt (Envir.norm_type tyenv U) ^ " of term " ^
-                    Syntax.string_of_term ctxt (Term.map_types (Envir.norm_type tyenv) u),
+                    Syntax.string_of_term ctxt (Term.map_types (Envir.norm_type_same tyenv) u),
                     0, [th])
                 end;
           in (tyenv', maxidx'') end;

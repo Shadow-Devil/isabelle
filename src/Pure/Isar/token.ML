@@ -35,6 +35,8 @@ sig
     Output of XML.body option
   val pos_of: T -> Position.T
   val adjust_offsets: (int -> int option) -> T -> T
+  val input_position: src -> string option
+  val context_input_position: Context.generic * src -> string option
   val eof: T
   val is_eof: T -> bool
   val not_eof: T -> bool
@@ -111,6 +113,7 @@ sig
   type 'a context_parser = Context.generic * T list -> 'a * (Context.generic * T list)
   val syntax_generic: 'a context_parser -> src -> Context.generic -> 'a * Context.generic
   val syntax: 'a context_parser -> src -> Proof.context -> 'a * Proof.context
+  val read: Proof.context -> 'a parser -> src -> 'a
 end;
 
 structure Token: TOKEN =
@@ -213,6 +216,12 @@ fun end_pos_of (Token ((_, (_, pos)), _, _)) = pos;
 
 fun adjust_offsets adjust (Token ((x, range), y, z)) =
   Token ((x, apply2 (Position.adjust_offsets adjust) range), y, z);
+
+fun input_position [] = NONE
+  | input_position (tok :: _) = SOME (Position.here (pos_of tok));
+
+fun context_input_position (_: Context.generic, []) = NONE
+  | context_input_position (_, tok :: _) = SOME (Position.here (pos_of tok));
 
 
 (* stopper *)
@@ -832,6 +841,8 @@ fun syntax_generic scan src0 context =
   end;
 
 fun syntax scan src = apsnd Context.the_proof o syntax_generic scan src o Context.Proof;
+
+fun read ctxt scan src = syntax (Scan.lift scan) src ctxt |> #1;
 
 end;
 

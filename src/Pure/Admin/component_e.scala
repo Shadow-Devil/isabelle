@@ -10,7 +10,7 @@ package isabelle
 object Component_E {
   /* build E prover */
 
-  val default_version = "2.6"
+  val default_version = "3.1"
   val default_download_url = "https://wwwlehre.dhbw-stuttgart.de/~sschulz/WORK/E_DOWNLOAD"
 
   def build_e(
@@ -19,6 +19,8 @@ object Component_E {
     progress: Progress = new Progress,
     target_dir: Path = Path.current
   ): Unit = {
+    Isabelle_System.require_command("patch")
+
     Isabelle_System.with_tmp_dir("build") { tmp_dir =>
       /* component */
 
@@ -26,10 +28,7 @@ object Component_E {
       val component_dir =
         Components.Directory(target_dir + Path.basic(component_name)).create(progress = progress)
 
-      val platform_name =
-        proper_string(Isabelle_System.getenv("ISABELLE_PLATFORM64"))
-          .getOrElse(error("No 64bit platform"))
-
+      val platform_name = Isabelle_Platform.self.ISABELLE_PLATFORM(apple = true)
       val platform_dir =
         Isabelle_System.make_directory(component_dir.path + Path.basic(platform_name))
 
@@ -77,7 +76,7 @@ object Component_E {
       /* settings */
 
       component_dir.write_settings("""
-E_HOME="$COMPONENT/$ISABELLE_PLATFORM64"
+E_HOME="$COMPONENT/${ISABELLE_APPLE_PLATFORM64:-$ISABELLE_PLATFORM64}"
 E_VERSION=""" + quote(version) + """
 """)
 
@@ -87,11 +86,11 @@ E_VERSION=""" + quote(version) + """
       File.write(component_dir.README,
         "This is E prover " + version + " from\n" + archive_url + """
 
-The distribution has been built like this:
+* The distribution has been built like this:
 
     cd src && """ + build_script + """
 
-Only a few executables from PROVERS/ have been moved to the platform-specific
+* Some executables from PROVERS/ have been moved to the platform-specific
 Isabelle component directory: x86_64-linux etc.
 
 
@@ -99,6 +98,7 @@ Isabelle component directory: x86_64-linux etc.
         """ + Date.Format.date(Date.now()) + "\n")
     }
 }
+
 
   /* Isabelle tool wrapper */
 

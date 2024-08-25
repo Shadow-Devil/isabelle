@@ -283,7 +283,7 @@ fun satisfied_application wanted ({ dom, range, ... }, ts) =
   let
     val given = length ts;
     val delta = wanted - given;
-    val (_, rty) = unfold_fun_n wanted range;
+    val rty = drop wanted dom `--> range;
   in
     if delta = 0 then
       (([], (ts, rty)), [])
@@ -532,7 +532,7 @@ fun annotate ctxt algbr eqngr (c, ty) args rhs =
   let
     val erase = map_types (fn _ => Type_Infer.anyT []);
     val reinfer = singleton (Type_Infer_Context.infer_types ctxt);
-    val lhs = list_comb (Const (c, ty), map (map_types Type.strip_sorts o snd) args);
+    val lhs = list_comb (Const (c, ty), map (Term.strip_sorts o snd) args);
     val reinferred_rhs = snd (Logic.dest_equals (reinfer (Logic.mk_equals (lhs, erase rhs))));
   in tag_term algbr eqngr reinferred_rhs rhs end
 

@@ -18,10 +18,10 @@ struct
 
 datatype 'a state =
     Set of 'a
-  | Unset of {lock: Mutex.mutex, cond: ConditionVar.conditionVar};
+  | Unset of {lock: Thread.Mutex.mutex, cond: Thread.ConditionVar.conditionVar};
 
 fun init_state () =
-  Unset {lock = Mutex.mutex (), cond = ConditionVar.conditionVar ()};
+  Unset {lock = Thread.Mutex.mutex (), cond = Thread.ConditionVar.conditionVar ()};
 
 abstype 'a var = Var of {name: string, state: 'a state Unsynchronized.ref}
 with
@@ -61,8 +61,9 @@ fun assign (Var {name, state}) x =
         (case ! state of
           Set _ => assign_fail name
         | Unset _ =>
-            Thread_Attributes.uninterruptible (fn _ => fn () =>
-             (state := Set x; RunCall.clearMutableBit state; ConditionVar.broadcast cond)) ())));
+            Thread_Attributes.uninterruptible_body (fn _ =>
+             (state := Set x; RunCall.clearMutableBit state;
+               Thread.ConditionVar.broadcast cond)))));
 
 end;
 

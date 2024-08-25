@@ -304,7 +304,7 @@ text \<open>
 
   The \<^verbatim>\<open>-n\<close> option reports the server name, and the \<^verbatim>\<open>-s\<close> option provides a
   different server name. The default server name is the official distribution
-  name (e.g.\ \<^verbatim>\<open>Isabelle2022\<close>). Thus @{tool jedit_client} can connect to the
+  name (e.g.\ \<^verbatim>\<open>Isabelle2024\<close>). Thus @{tool jedit_client} can connect to the
   Isabelle desktop application without further options.
 
   The \<^verbatim>\<open>-p\<close> option allows to override the implicit default of the system
@@ -1153,7 +1153,7 @@ text \<open>
 
     \<^item> The \<^emph>\<open>Search\<close> field allows to highlight query output according to some
     regular expression, in the notation that is commonly used on the Java
-    platform.\<^footnote>\<open>\<^url>\<open>https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/regex/Pattern.html\<close>\<close>
+    platform.\<^footnote>\<open>\<^url>\<open>https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/regex/Pattern.html\<close>\<close>
     This may serve as an additional visual filter of the result.
 
     \<^item> The \<^emph>\<open>Zoom\<close> box controls the font size of the output area.

@@ -842,7 +842,7 @@ proof -
     by (simp add: has_field_derivative_def has_derivative_at2 bounded_linear_mult_right)
 qed
 
-(** Existence of a primitive.*)
+text \<open>Existence of a primitive\<close>
 lemma holomorphic_starlike_primitive:
   fixes f :: "complex \<Rightarrow> complex"
   assumes contf: "continuous_on S f"
@@ -1017,8 +1017,7 @@ lemma contour_integral_local_primitive_lemma:
   assumes gpd: "g piecewise_differentiable_on {a..b}"
       and dh: "\<And>x. x \<in> S \<Longrightarrow> (f has_field_derivative f' x) (at x within S)"
       and gs: "\<And>x. x \<in> {a..b} \<Longrightarrow> g x \<in> S"
-  shows 
-    "(\<lambda>x. f' (g x) * vector_derivative g (at x within {a..b})) integrable_on {a..b}"
+    shows "(\<lambda>x. f' (g x) * vector_derivative g (at x within {a..b})) integrable_on {a..b}"
 proof (cases "cbox a b = {}")
   case False
   then show ?thesis
@@ -1121,6 +1120,11 @@ proof -
   ultimately show ?thesis
     by (metis Diff_empty contour_integrable_holomorphic finite.emptyI g os)
 qed
+
+lemma analytic_imp_contour_integrable:
+  assumes "f analytic_on path_image p" "valid_path p"
+  shows   "f contour_integrable_on p"
+  by (meson analytic_on_holomorphic assms contour_integrable_holomorphic_simple)
 
 lemma continuous_on_inversediff:
   fixes z:: "'a::real_normed_field" shows "z \<notin> S \<Longrightarrow> continuous_on S (\<lambda>w. 1 / (w - z))"

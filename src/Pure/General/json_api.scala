@@ -6,8 +6,6 @@ Support for JSON:API: https://jsonapi.org/format
 
 package isabelle
 
-import java.net.URL
-
 
 object JSON_API {
   val mime_type = "application/vnd.api+json"
@@ -15,11 +13,11 @@ object JSON_API {
   def api_error(msg: String): Nothing = error("JSON API error: " + msg)
   def api_errors(msgs: List[String]): Nothing = error(("JSON API errors:" :: msgs).mkString("\n  "))
 
-  class Service(val url: URL) {
+  class Service(val url: Url) {
     override def toString: String = url.toString
 
     def get(route: String): HTTP.Content =
-      HTTP.Client.get(if (route.isEmpty) url else new URL(url, route))
+      HTTP.Client.get(url.resolve(route))
 
     def get_root(route: String = ""): Root =
       Root(get(if_proper(route, "/" + route)).json)
@@ -69,7 +67,7 @@ object JSON_API {
   sealed case class Links(json: JSON.T) {
     def get_next: Option[Service] =
       for {
-        JSON.Value.String(next) <- JSON.value(json, "next")
+        case JSON.Value.String(next) <- JSON.value(json, "next")
         if Url.is_wellformed(next)
       } yield new Service(Url(next))
 

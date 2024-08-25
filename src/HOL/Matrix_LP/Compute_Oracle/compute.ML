@@ -297,7 +297,7 @@ fun make_internal machine thy stamp encoding cache_pattern_terms raw_ths =
               | HASKELL => ProgHaskell (AM_GHC.compile rules)
               | SML => ProgSML (AM_SML.compile rules)
 
-        fun has_witness s = not (null (Sign.witness_sorts thy [] [s]))
+        fun has_witness s = not (null (#1 (Sign.witness_sorts thy [] [s])))
 
         val shyptable = fold Sorttab.delete (filter has_witness (Sorttab.keys (shyptable))) shyptable
 
@@ -339,13 +339,13 @@ fun add_shyps shyps tab = fold (fn h => fn tab => Sorttab.update (h, ()) tab) sh
 
 fun merge_shyps shyps1 shyps2 = Sorttab.keys (add_shyps shyps2 (add_shyps shyps1 Sorttab.empty))
 
-val (_, export_oracle) = Context.>>> (Context.map_theory_result
-  (Thm.add_oracle (\<^binding>\<open>compute\<close>, fn (thy, hyps, shyps, prop) =>
+val (_, export_oracle) =
+  Theory.setup_result (Thm.add_oracle (\<^binding>\<open>compute\<close>, fn (thy, hyps, shyps, prop) =>
     let
         val shyptab = add_shyps shyps Sorttab.empty
         fun delete s shyptab = Sorttab.delete s shyptab handle Sorttab.UNDEF _ => shyptab
         fun delete_term t shyptab = fold delete (Sorts.insert_term t []) shyptab
-        fun has_witness s = not (null (Sign.witness_sorts thy [] [s]))
+        fun has_witness s = not (null (#1 (Sign.witness_sorts thy [] [s])))
         val shyptab = fold Sorttab.delete (filter has_witness (Sorttab.keys (shyptab))) shyptab
         val shyps = if Sorttab.is_empty shyptab then [] else Sorttab.keys (fold delete_term (prop::hyps) shyptab)
         val _ =
@@ -355,7 +355,7 @@ val (_, export_oracle) = Context.>>> (Context.map_theory_result
           else ()
     in
         Thm.global_cterm_of thy (fold_rev (fn hyp => fn p => Logic.mk_implies (hyp, p)) hyps prop)
-    end)));
+    end));
 
 fun export_thm thy hyps shyps prop =
     let

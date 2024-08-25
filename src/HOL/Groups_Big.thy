@@ -409,6 +409,11 @@ next
   qed
 qed
 
+lemma cartesian_product':
+  "F g (A \<times> B) = F (\<lambda>x. F (\<lambda>y. g (x,y)) B) A"
+  unfolding cartesian_product by simp
+
+
 lemma inter_restrict:
   assumes "finite A"
   shows "F g (A \<inter> B) = F (\<lambda>x. if x \<in> B then g x else \<^bold>1) A"
@@ -736,6 +741,22 @@ lemma sum_diff1':
 lemma (in ordered_comm_monoid_add) sum_mono:
   "(\<And>i. i\<in>K \<Longrightarrow> f i \<le> g i) \<Longrightarrow> (\<Sum>i\<in>K. f i) \<le> (\<Sum>i\<in>K. g i)"
   by (induct K rule: infinite_finite_induct) (use add_mono in auto)
+
+lemma (in ordered_cancel_comm_monoid_add) sum_strict_mono_strong:
+  assumes "finite A" "a \<in> A" "f a < g a"
+    and "\<And>x. x \<in> A \<Longrightarrow> f x \<le> g x"
+  shows "sum f A < sum g A"
+proof -
+  have "sum f A = f a + sum f (A-{a})"
+    by (simp add: assms sum.remove)
+  also have "\<dots> \<le> f a + sum g (A-{a})"
+    using assms by (meson DiffD1 add_left_mono sum_mono)
+  also have "\<dots> < g a + sum g (A-{a})"
+    using assms add_less_le_mono by blast
+  also have "\<dots> = sum g A"
+    using assms by (intro sum.remove [symmetric])
+  finally show ?thesis .
+qed
 
 lemma (in strict_ordered_comm_monoid_add) sum_strict_mono:
   assumes "finite A" "A \<noteq> {}"
@@ -1591,26 +1612,33 @@ qed
 context linordered_semidom
 begin
 
-lemma prod_nonneg: "(\<forall>a\<in>A. 0 \<le> f a) \<Longrightarrow> 0 \<le> prod f A"
+lemma prod_nonneg: "(\<And>a. a\<in>A \<Longrightarrow> 0 \<le> f a) \<Longrightarrow> 0 \<le> prod f A"
   by (induct A rule: infinite_finite_induct) simp_all
 
-lemma prod_pos: "(\<forall>a\<in>A. 0 < f a) \<Longrightarrow> 0 < prod f A"
+lemma prod_pos: "(\<And>a. a\<in>A \<Longrightarrow> 0 < f a) \<Longrightarrow> 0 < prod f A"
   by (induct A rule: infinite_finite_induct) simp_all
 
 lemma prod_mono:
   "(\<And>i. i \<in> A \<Longrightarrow> 0 \<le> f i \<and> f i \<le> g i) \<Longrightarrow> prod f A \<le> prod g A"
   by (induct A rule: infinite_finite_induct) (force intro!: prod_nonneg mult_mono)+
 
+text \<open>Only one needs to be strict\<close>
 lemma prod_mono_strict:
-  assumes "finite A" "\<And>i. i \<in> A \<Longrightarrow> 0 \<le> f i \<and> f i < g i" "A \<noteq> {}"
-  shows "prod f A < prod g A"
-  using assms
-proof (induct A rule: finite_induct)
-  case empty
-  then show ?case by simp
-next
-  case insert
-  then show ?case by (force intro: mult_strict_mono' prod_nonneg)
+  assumes "i \<in> A" "f i < g i"
+  assumes "finite A"
+  assumes "\<And>i. i \<in> A \<Longrightarrow> 0 \<le> f i \<and> f i \<le> g i"
+  assumes "\<And>i. i \<in> A \<Longrightarrow> 0 < g i"
+  shows   "prod f A < prod g A"
+proof -
+  have "prod f A = f i * prod f (A - {i})"
+    using assms by (intro prod.remove)
+  also have "\<dots> \<le> f i * prod g (A - {i})"
+    using assms by (intro mult_left_mono prod_mono) auto
+  also have "\<dots> < g i * prod g (A - {i})"
+    using assms by (intro mult_strict_right_mono prod_pos) auto
+  also have "\<dots> = prod g A"
+    using assms by (intro prod.remove [symmetric])
+  finally show ?thesis .
 qed
 
 lemma prod_le_power:
@@ -1726,14 +1754,13 @@ proof induction
   case empty
   then show ?case by auto
 next
-  case (insert x F)
-  from insertI1 have "0 \<le> g (f x)" by (rule insert)
-  hence 1: "sum g (f ` F) \<le> g (f x) + sum g (f ` F)" using add_increasing by blast
-  have 2: "sum g (f ` F) \<le> sum (g \<circ> f) F" using insert by blast
-  have "sum g (f ` insert x F) = sum g (insert (f x) (f ` F))" by simp
-  also have "\<dots> \<le> g (f x) + sum g (f ` F)" by (simp add: 1 insert sum.insert_if)
-  also from 2 have "\<dots> \<le> g (f x) + sum (g \<circ> f) F" by (rule add_left_mono)
-  also from insert(1, 2) have "\<dots> = sum (g \<circ> f) (insert x F)" by (simp add: sum.insert_if)
+  case (insert i I)
+  hence *: "sum g (f ` I) \<le> g (f i) + sum g (f ` I)" 
+           "sum g (f ` I) \<le> sum (g \<circ> f) I" using add_increasing by blast+
+  have "sum g (f ` insert i I) = sum g (insert (f i) (f ` I))" by simp
+  also have "\<dots> \<le> g (f i) + sum g (f ` I)" by (simp add: * insert sum.insert_if)
+  also from * have "\<dots> \<le> g (f i) + sum (g \<circ> f) I" by (intro add_left_mono)
+  also from insert have "\<dots> = sum (g \<circ> f) (insert i I)" by (simp add: sum.insert_if)
   finally show ?case .
 qed
 

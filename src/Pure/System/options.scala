@@ -11,9 +11,23 @@ object Options {
   val empty: Options = new Options()
 
   object Spec {
+    val syntax: Outer_Syntax = Outer_Syntax.empty + "=" + ","
+
+    def parse(content: String): List[Spec] = {
+      val parser = Parsers.repsep(Parsers.option_spec, Parsers.$$$(","))
+      val reader = Token.reader(Token.explode(syntax.keywords, content), Token.Pos.none)
+      Parsers.parse_all(parser, reader) match {
+        case Parsers.Success(result, _) => result
+        case bad => error(bad.toString)
+      }
+    }
+
+    def eq(a: String, b: String, permissive: Boolean = false): Spec =
+      Spec(a, value = Some(b), permissive = permissive)
+
     def make(s: String): Spec =
       s match {
-        case Properties.Eq(a, b) => Spec(a, Some(b))
+        case Properties.Eq(a, b) => eq(a, b)
         case _ => Spec(s)
       }
 
@@ -25,19 +39,32 @@ object Options {
         case Value.Boolean(_) => s
         case Value.Long(_) => s
         case Value.Double(_) => s
-        case _ => Token.quote_name(specs_syntax.keywords, s)
+        case _ => Token.quote_name(syntax.keywords, s)
       }
 
     def print(name: String, value: String): String = Properties.Eq(name, print_value(value))
+
+    def bash_strings(opts: Iterable[Spec], bg: Boolean = false, en: Boolean = false): String = {
+      val it = opts.iterator
+      if (it.isEmpty) ""
+      else {
+        it.map(opt => "-o " + Bash.string(opt.toString))
+          .mkString(if (bg) " " else "", " ", if (en) " " else "")
+      }
+    }
   }
 
   sealed case class Spec(name: String, value: Option[String] = None, permissive: Boolean = false) {
     override def toString: String = name + if_proper(value, "=" + value.get)
-    def print: String = name + if_proper(value, "=" + Spec.print_value(value.get))
+    def print: String =
+      value match {
+        case None => name
+        case Some(v) => Spec.print(name, v)
+      }
   }
 
   sealed case class Change(name: String, value: String, unknown: Boolean) {
-    def spec: Spec = Spec(name, Some(value))
+    def spec: Spec = Spec.eq(name, value)
 
     def print_prefs: String =
       name + " = " + Outer_Syntax.quote_string(value) +
@@ -77,7 +104,8 @@ object Options {
 
   val TAG_CONTENT = "content"    // formal theory content
   val TAG_DOCUMENT = "document"  // document preparation
-  val TAG_BUILD = "build"        // relavant for "isabelle build"
+  val TAG_BUILD = "build"        // relevant for "isabelle build"
+  val TAG_BUILD_SYNC = "build_sync" // relevant for distributed "isabelle build"
   val TAG_UPDATE = "update"      // relevant for "isabelle update"
   val TAG_CONNECTION = "connection"  // private information about connections (password etc.)
   val TAG_COLOR_DIALOG = "color_dialog"  // special color selection dialog
@@ -117,7 +145,7 @@ object Options {
           case word :: rest if word == strip => rest
           case _ => words
         }
-      Word.implode(words1.map(Word.perhaps_capitalize))
+      Word.implode(words1.map(Word.perhaps_capitalized))
     }
     def title_jedit: String = title("jedit")
 
@@ -127,6 +155,7 @@ object Options {
     def for_content: Boolean = for_tag(TAG_CONTENT)
     def for_document: Boolean = for_tag(TAG_DOCUMENT)
     def for_color_dialog: Boolean = for_tag(TAG_COLOR_DIALOG)
+    def for_build_sync: Boolean = for_tag(TAG_BUILD_SYNC)
 
     def session_content: Boolean = for_content || for_document
   }
@@ -151,7 +180,6 @@ object Options {
       STANDARD + FOR
 
   val prefs_syntax: Outer_Syntax = Outer_Syntax.empty + "="
-  val specs_syntax: Outer_Syntax = prefs_syntax + ","
 
   trait Parsers extends Parse.Parsers {
     val option_name: Parser[String] = atom("option name", _.is_name)
@@ -167,7 +195,7 @@ object Options {
       $$$(FOR) ~! rep(option_tag) ^^ { case _ ~ x => x } | success(Nil)
     val option_spec: Parser[Spec] =
       option_name ~ opt($$$("=") ~! option_value ^^ { case _ ~ x => x }) ^^
-        { case x ~ y => Options.Spec(x, y) }
+        { case x ~ y => Options.Spec(x, value = y) }
   }
 
   private object Parsers extends Parsers {
@@ -187,7 +215,7 @@ object Options {
     val prefs_entry: Parser[Options => Options] = {
       option_name ~ ($$$("=") ~! option_value) ^^
       { case a ~ (_ ~ b) => (options: Options) =>
-          options + Options.Spec(a, Some(b), permissive = true) }
+          options + Options.Spec.eq(a, b, permissive = true) }
     }
 
     def parse_file(
@@ -213,15 +241,6 @@ object Options {
 
   def read_prefs(file: Path = PREFS): String =
     if (file.is_file) File.read(file) else ""
-
-  def parse_specs(content: String): List[Spec] = {
-    val parser = Parsers.repsep(Parsers.option_spec, Parsers.$$$(","))
-    val reader = Token.reader(Token.explode(specs_syntax.keywords, content), Token.Pos.none)
-    Parsers.parse_all(parser, reader) match {
-      case Parsers.Success(result, _) => result
-      case bad => error(bad.toString)
-    }
-  }
 
   def inline(content: String): Options = Parsers.parse_file(empty, "inline", content)
 
@@ -314,7 +333,7 @@ final class Options private(
   def description(name: String): String = check_name(name).description
 
   def spec(name: String): Options.Spec =
-    Options.Spec(name, Some(check_name(name).value))
+    Options.Spec.eq(name, check_name(name).value)
 
 
   /* check */
@@ -379,6 +398,11 @@ final class Options private(
     }
 
   def seconds(name: String): Time = Time.seconds(real(name))
+
+  def threads(default: => Int = Multithreading.num_processors()): Int =
+    Multithreading.max_threads(value = int("threads"), default = default)
+
+  def standard_ml(): Options = int.update("threads", threads())
 
 
   /* external updates */
@@ -515,7 +539,7 @@ class Options_Variable(init_options: Options) {
 
   def value: Options = synchronized { _options }
   def change(f: Options => Options): Unit = synchronized { _options = f(_options) }
-  def += (name: String, x: String): Unit = change(options => options + Options.Spec(name, Some(x)))
+  def += (name: String, x: String): Unit = change(options => options + Options.Spec.eq(name, x))
 
   val bool: Options.Access_Variable[Boolean] =
     new Options.Access_Variable[Boolean](this, _.bool)

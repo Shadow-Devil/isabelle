@@ -224,21 +224,20 @@ lemma holomorphic_on_cos' [holomorphic_intros]:
   shows   "(\<lambda>x. cos (f x)) holomorphic_on A"
   using holomorphic_on_compose[OF assms holomorphic_on_cos] by (simp add: o_def)
 
-lemma analytic_on_sin [analytic_intros]: "sin analytic_on A"
-  using analytic_on_holomorphic holomorphic_on_sin by blast
+lemma analytic_on_sin [analytic_intros]: "f analytic_on A \<Longrightarrow> (\<lambda>w. sin (f w)) analytic_on A"
+  and analytic_on_cos [analytic_intros]: "f analytic_on A \<Longrightarrow> (\<lambda>w. cos (f w)) analytic_on A"
+  and analytic_on_sinh [analytic_intros]: "f analytic_on A \<Longrightarrow> (\<lambda>w. sinh (f w)) analytic_on A"
+  and analytic_on_cosh [analytic_intros]: "f analytic_on A \<Longrightarrow> (\<lambda>w. cosh (f w)) analytic_on A"
+  unfolding sin_exp_eq cos_exp_eq sinh_def cosh_def
+  by (auto intro!: analytic_intros)
 
-lemma analytic_on_sin' [analytic_intros]:
-  "f analytic_on A \<Longrightarrow> (\<And>z. z \<in> A \<Longrightarrow> f z \<notin> range (\<lambda>n. complex_of_real pi * of_int n)) \<Longrightarrow>
-   (\<lambda>z. sin (f z)) analytic_on A"
-  using analytic_on_compose_gen[OF _ analytic_on_sin[of UNIV], of f A] by (simp add: o_def)
-
-lemma analytic_on_cos [analytic_intros]: "cos analytic_on A"
-  using analytic_on_holomorphic holomorphic_on_cos by blast
-
-lemma analytic_on_cos' [analytic_intros]:
-  "f analytic_on A \<Longrightarrow> (\<And>z. z \<in> A \<Longrightarrow> f z \<notin> range (\<lambda>n. complex_of_real pi * of_int n)) \<Longrightarrow>
-   (\<lambda>z. cos (f z)) analytic_on A"
-  using analytic_on_compose_gen[OF _ analytic_on_cos[of UNIV], of f A] by (simp add: o_def)
+lemma analytic_on_tan [analytic_intros]:
+        "f analytic_on A \<Longrightarrow> (\<And>z. z \<in> A \<Longrightarrow> cos (f z) \<noteq> 0) \<Longrightarrow> (\<lambda>w. tan (f w)) analytic_on A"
+  and analytic_on_cot [analytic_intros]:
+        "f analytic_on A \<Longrightarrow> (\<And>z. z \<in> A \<Longrightarrow> sin (f z) \<noteq> 0) \<Longrightarrow> (\<lambda>w. cot (f w)) analytic_on A"
+  and analytic_on_tanh [analytic_intros]:
+        "f analytic_on A \<Longrightarrow> (\<And>z. z \<in> A \<Longrightarrow> cosh (f z) \<noteq> 0) \<Longrightarrow> (\<lambda>w. tanh (f w)) analytic_on A"
+  unfolding tan_def cot_def tanh_def by (auto intro!: analytic_intros)
 
 subsection\<^marker>\<open>tag unimportant\<close>\<open>More on the Polar Representation of Complex Numbers\<close>
 
@@ -365,19 +364,6 @@ next
     ultimately show "(\<lambda>j. exp (\<i> * \<theta> j)) \<longlonglongrightarrow> exp (\<i> * \<Theta>)"
       by auto
   qed
-qed
-
-lemma sin_cos_eq_iff: "sin y = sin x \<and> cos y = cos x \<longleftrightarrow> (\<exists>n::int. y = x + 2 * pi * n)" (is "?L=?R")
-proof
-  assume ?L
-  then have "cos (y-x) = 1"
-    using cos_add [of y "-x"] by simp
-  then show ?R
-    by (metis cos_one_2pi_int add.commute diff_add_cancel mult.assoc mult.commute) 
-next
-  assume ?R
-  then show ?L
-    by (auto simp: sin_add cos_add)
 qed
 
 lemma exp_i_ne_1:
@@ -1264,6 +1250,18 @@ lemma holomorphic_on_Ln' [holomorphic_intros]:
   "(\<And>z. z \<in> A \<Longrightarrow> f z \<notin> \<real>\<^sub>\<le>\<^sub>0) \<Longrightarrow> f holomorphic_on A \<Longrightarrow> (\<lambda>z. Ln (f z)) holomorphic_on A"
   using holomorphic_on_compose_gen[OF _ holomorphic_on_Ln, of f A "- \<real>\<^sub>\<le>\<^sub>0"]
   by (auto simp: o_def)
+
+lemma analytic_on_ln [analytic_intros]:
+  assumes "f analytic_on A" "f ` A \<inter> \<real>\<^sub>\<le>\<^sub>0 = {}"
+  shows   "(\<lambda>w. ln (f w)) analytic_on A"
+proof -
+  have *: "ln analytic_on (-\<real>\<^sub>\<le>\<^sub>0)"
+    by (subst analytic_on_open) (auto intro!: holomorphic_intros)
+  have "(ln \<circ> f) analytic_on A"
+    by (rule analytic_on_compose_gen[OF assms(1) *]) (use assms(2) in auto)
+  thus ?thesis
+    by (simp add: o_def)
+qed
 
 lemma tendsto_Ln [tendsto_intros]:
   assumes "(f \<longlongrightarrow> L) F" "L \<notin> \<real>\<^sub>\<le>\<^sub>0"
@@ -2392,8 +2390,7 @@ lemma norm_powr_real_mono:
   by (auto simp: powr_def algebra_simps Reals_def Ln_of_real)
 
 lemma powr_times_real:
-    "\<lbrakk>x \<in> \<real>; y \<in> \<real>; 0 \<le> Re x; 0 \<le> Re y\<rbrakk>
-           \<Longrightarrow> (x * y) powr z = x powr z * y powr z"
+    "\<lbrakk>x \<in> \<real>; y \<in> \<real>; 0 \<le> Re x; 0 \<le> Re y\<rbrakk> \<Longrightarrow> (x * y) powr z = x powr z * y powr z"
   by (auto simp: Reals_def powr_def Ln_times exp_add algebra_simps less_eq_real_def Ln_of_real)
 
 lemma Re_powr_le: "r \<in> \<real>\<^sub>\<ge>\<^sub>0 \<Longrightarrow> Re (r powr z) \<le> Re r powr Re z"
@@ -2404,6 +2401,12 @@ lemma
   assumes "w \<in> \<real>\<^sub>\<ge>\<^sub>0" "z \<in> \<real>"
   shows Reals_powr [simp]: "w powr z \<in> \<real>" and nonneg_Reals_powr [simp]: "w powr z \<in> \<real>\<^sub>\<ge>\<^sub>0"
   using assms by (auto simp: nonneg_Reals_def Reals_def powr_of_real)
+
+lemma exp_powr_complex:
+  fixes x::complex 
+  assumes "-pi < Im(x)" "Im(x) \<le> pi"
+  shows "exp x powr y = exp (x*y)"
+  using assms by (simp add: powr_def mult.commute)
 
 lemma powr_neg_real_complex:
   fixes w::complex

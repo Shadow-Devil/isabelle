@@ -557,7 +557,7 @@ ML \<open>
 
 signature LIST_TO_SET_COMPREHENSION =
 sig
-  val simproc : Proof.context -> cterm -> thm option
+  val proc: Simplifier.proc
 end
 
 structure List_to_Set_Comprehension : LIST_TO_SET_COMPREHENSION =
@@ -717,7 +717,7 @@ fun tac ctxt [] =
 
 in
 
-fun simproc ctxt redex =
+fun proc ctxt redex =
   let
     fun make_inner_eqs bound_vs Tis eqs t =
       (case dest_case ctxt t of
@@ -774,7 +774,7 @@ end
 \<close>
 
 simproc_setup list_to_set_comprehension ("set xs") =
-  \<open>K List_to_Set_Comprehension.simproc\<close>
+  \<open>K List_to_Set_Comprehension.proc\<close>
 
 code_datatype set coset
 hide_const (open) coset
@@ -4118,6 +4118,21 @@ lemma successively_remdups_adj_iff:
   successively P (remdups_adj xs) \<longleftrightarrow> successively P xs"
 by (induction xs rule: remdups_adj.induct)(auto simp: successively_Cons)
 
+lemma successively_conv_nth:
+  "successively P xs \<longleftrightarrow> (\<forall>i. Suc i < length xs \<longrightarrow> P (xs ! i) (xs ! Suc i))"
+  by (induction P xs rule: successively.induct)
+     (force simp: nth_Cons split: nat.splits)+
+
+lemma successively_nth: "successively P xs \<Longrightarrow> Suc i < length xs \<Longrightarrow> P (xs ! i) (xs ! Suc i)"
+  unfolding successively_conv_nth by blast
+
+lemma distinct_adj_conv_nth:
+  "distinct_adj xs \<longleftrightarrow> (\<forall>i. Suc i < length xs \<longrightarrow> xs ! i \<noteq> xs ! Suc i)"
+  by (simp add: distinct_adj_def successively_conv_nth)
+
+lemma distinct_adj_nth: "distinct_adj xs \<Longrightarrow> Suc i < length xs \<Longrightarrow> xs ! i \<noteq> xs ! Suc i"
+  unfolding distinct_adj_conv_nth by blast
+
 lemma remdups_adj_Cons':
   "remdups_adj (x # xs) = x # remdups_adj (dropWhile (\<lambda>y. y = x) xs)"
 by (induction xs) auto
@@ -4163,6 +4178,34 @@ lemma remdups_adj_append'': "xs \<noteq> []
   \<Longrightarrow> remdups_adj (xs @ ys) = remdups_adj xs @ remdups_adj (dropWhile (\<lambda>y. y = last xs) ys)"
 by (induction xs rule: remdups_adj.induct) (auto simp: remdups_adj_Cons')
 
+lemma remdups_filter_last:
+ "last [x\<leftarrow>remdups xs. P x] = last [x\<leftarrow>xs. P x]"
+by (induction xs, auto simp: filter_empty_conv)
+
+lemma remdups_append:
+ "set xs \<subseteq> set ys \<Longrightarrow> remdups (xs @ ys) = remdups ys"
+  by (induction xs, simp_all)
+
+lemma remdups_concat:
+ "remdups (concat (remdups xs)) = remdups (concat xs)"
+proof (induction xs)
+  case Nil
+  then show ?case by simp
+next
+  case (Cons a xs)
+  show ?case
+  proof (cases "a \<in> set xs")
+    case True
+    then have "remdups (concat xs) = remdups (a @ concat xs)"
+      by (metis remdups_append concat.simps(2) insert_absorb set_simps(2) set_append set_concat sup_ge1)
+    then show ?thesis
+      by (simp add: Cons True)
+  next
+    case False
+    then show ?thesis
+      by (metis Cons remdups_append2 concat.simps(2) remdups.simps(2))
+  qed
+qed
 
 subsection \<open>@{const distinct_adj}\<close>
 
@@ -4212,6 +4255,14 @@ unfolding distinct_adj_def successively_map by (erule successively_mono) auto
 
 lemma distinct_adj_map_iff: "inj_on f (set xs) \<Longrightarrow> distinct_adj (map f xs) \<longleftrightarrow> distinct_adj xs"
 using distinct_adj_mapD distinct_adj_mapI by blast
+
+lemma distinct_adj_conv_length_remdups_adj:
+  "distinct_adj xs \<longleftrightarrow> length (remdups_adj xs) = length xs"
+proof (induction xs rule: remdups_adj.induct)
+  case (3 x y xs)
+  thus ?case
+    using remdups_adj_length[of "y # xs"] by auto
+qed auto
 
 
 subsubsection \<open>\<^const>\<open>insert\<close>\<close>
@@ -4379,33 +4430,32 @@ lemma set_remove1_eq [simp]: "distinct xs \<Longrightarrow> set(remove1 x xs) = 
 
 lemma length_remove1:
   "length(remove1 x xs) = (if x \<in> set xs then length xs - 1 else length xs)"
-by (induct xs) (auto dest!:length_pos_if_in_set)
+  by (induct xs) (auto dest!:length_pos_if_in_set)
 
 lemma remove1_filter_not[simp]:
   "\<not> P x \<Longrightarrow> remove1 x (filter P xs) = filter P xs"
-by(induct xs) auto
+  by(induct xs) auto
 
 lemma filter_remove1:
   "filter Q (remove1 x xs) = remove1 x (filter Q xs)"
-by (induct xs) auto
+  by (induct xs) auto
 
 lemma notin_set_remove1[simp]: "x \<notin> set xs \<Longrightarrow> x \<notin> set(remove1 y xs)"
-by(insert set_remove1_subset) fast
+  by(insert set_remove1_subset) fast
 
 lemma distinct_remove1[simp]: "distinct xs \<Longrightarrow> distinct(remove1 x xs)"
-by (induct xs) simp_all
+  by (induct xs) simp_all
 
 lemma remove1_remdups:
   "distinct xs \<Longrightarrow> remove1 x (remdups xs) = remdups (remove1 x xs)"
-by (induct xs) simp_all
+  by (induct xs) simp_all
 
 lemma remove1_idem: "x \<notin> set xs \<Longrightarrow> remove1 x xs = xs"
-by (induct xs) simp_all
+  by (induct xs) simp_all
 
 lemma remove1_split:
   "a \<in> set xs \<Longrightarrow> remove1 a xs = ys \<longleftrightarrow> (\<exists>ls rs. xs = ls @ a # rs \<and> a \<notin> set ls \<and> ys = ls @ rs)"
-by (metis remove1.simps(2) remove1_append split_list_first)
-
+  by (metis remove1.simps(2) remove1_append split_list_first)
 
 subsubsection \<open>\<^const>\<open>removeAll\<close>\<close>
 
@@ -5325,6 +5375,14 @@ lemma arg_min_list_in: "xs \<noteq> [] \<Longrightarrow> arg_min_list f xs \<in>
 
 subsubsection \<open>(In)finiteness\<close>
 
+lemma finite_list_length: "finite {xs::('a::finite) list. length xs = n}"
+proof(induction n)
+  case (Suc n)
+  have "{xs::'a list. length xs = Suc n} = (\<Union>x. (#) x ` {xs. length xs = n})"
+    by (auto simp: length_Suc_conv)
+  then show ?case using Suc by simp
+qed simp
+
 lemma finite_maxlen:
   "finite (M::'a list set) \<Longrightarrow> \<exists>n. \<forall>s\<in>M. size s < n"
 proof (induct rule: finite.induct)
@@ -5369,14 +5427,13 @@ proof -
   finally show ?thesis by simp
 qed
 
-lemma finite_lists_distinct_length_eq [intro]:
+lemma finite_subset_distinct:
   assumes "finite A"
-  shows "finite {xs. length xs = n \<and> distinct xs \<and> set xs \<subseteq> A}" (is "finite ?S")
-proof -
-  have "finite {xs. set xs \<subseteq> A \<and> length xs = n}"
-    using \<open>finite A\<close> by (rule finite_lists_length_eq)
-  moreover have "?S \<subseteq> {xs. set xs \<subseteq> A \<and> length xs = n}" by auto
-  ultimately show ?thesis using finite_subset by auto
+  shows "finite {xs. set xs \<subseteq> A \<and> distinct xs}" (is "finite ?S")
+proof (rule finite_subset)
+  from assms show "?S \<subseteq> {xs. set xs \<subseteq> A \<and> length xs \<le> card A}"
+    by clarsimp (metis distinct_card card_mono)
+  from assms show "finite ..." by (rule finite_lists_length_le)
 qed
 
 lemma card_lists_distinct_length_eq:
@@ -8094,9 +8151,12 @@ lemma set_relcomp [code]:
   "set xys O set yzs = set ([(fst xy, snd yz). xy \<leftarrow> xys, yz \<leftarrow> yzs, snd xy = fst yz])"
   by auto (auto simp add: Bex_def image_def)
 
-lemma wf_set [code]:
+lemma wf_set:
   "wf (set xs) = acyclic (set xs)"
   by (simp add: wf_iff_acyclic_if_finite)
+
+lemma wf_code_set[code]: "wf_code (set xs) = acyclic (set xs)"
+  unfolding wf_code_def using wf_set .
 
 
 subsection \<open>Setup for Lifting/Transfer\<close>

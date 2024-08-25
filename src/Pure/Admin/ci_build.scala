@@ -45,11 +45,22 @@ object CI_Build {
     clean: Boolean = true,
     include: List[Path] = Nil,
     select: List[Path] = Nil,
-    pre_hook: () => Result = () => Result.ok,
-    post_hook: (Build.Results, Time) => Result = (_, _) => Result.ok,
-    selection: Sessions.Selection = Sessions.Selection.empty
-  )
+    pre_hook: Options => Result = _ => Result.ok,
+    post_hook: (Build.Results, Options, Time) => Result = (_, _, _) => Result.ok,
+    selection: Sessions.Selection = Sessions.Selection.empty)
 
+
+  def mail_server(options: Options): Mail.Server = {
+    val sender =
+      proper_string(options.string("ci_mail_sender")).map(Mail.address) getOrElse
+        Mail.default_address
+
+    new Mail.Server(sender,
+      smtp_host = options.string("ci_mail_smtp_host"),
+      smtp_port = options.int("ci_mail_smtp_port"),
+      user = options.string("ci_mail_user"),
+      password = options.string("ci_mail_password"))
+  }
 
   /* ci build jobs */
 
@@ -105,16 +116,6 @@ object CI_Build {
 
   /* ci build */
 
-  private def load_properties(): JProperties = {
-    val props = new JProperties
-    val file_name = Isabelle_System.getenv("ISABELLE_CI_PROPERTIES")
-    if (file_name.nonEmpty) {
-      val path = Path.explode(file_name)
-      if (path.is_file) props.load(Files.newBufferedReader(path.java_path))
-    }
-    props
-  }
-
   private def compute_timing(results: Build.Results, group: Option[String]): Timing = {
     val timings =
       results.sessions.collect {
@@ -126,10 +127,7 @@ object CI_Build {
 
   private def with_documents(options: Options, config: Build_Config): Options = {
     if (config.documents) {
-      options
-        .bool.update("browser_info", true)
-        .string.update("document", "pdf")
-        .string.update("document_variants", "document:outline=/proof,/ML")
+      options + "browser_info" + "document=pdf" + "document_variants=document:outline=/proof,/ML"
     }
     else options
   }
@@ -138,9 +136,9 @@ object CI_Build {
     Mercurial.repository(path).id()
 
   def print_section(title: String): Unit =
-    println(s"\n=== $title ===\n")
+    println("\n=== " + title + " ===\n")
 
-  def ci_build(job: Job): Unit = {
+  def ci_build(options: Options, job: Job): Unit = {
     val profile = job.profile
     val config = job.config
 
@@ -153,20 +151,18 @@ object CI_Build {
 
     print_section("CONFIGURATION")
     println(Build_Log.Settings.show())
-    val props = load_properties()
-    System.getProperties.asInstanceOf[JMap[AnyRef, AnyRef]].putAll(props)
 
-    val options =
-      with_documents(Options.init(), config)
-        .int.update("parallel_proofs", 1)
-        .int.update("threads", profile.threads)
+    val build_options =
+      with_documents(options, config).int.update("threads", profile.threads) +
+        "parallel_proofs=1" + "system_heaps"
 
-    println(s"jobs = ${profile.jobs}, threads = ${profile.threads}, numa = ${profile.numa}")
+    println(
+      "jobs = " + profile.jobs + ", threads = " + profile.threads + ", numa = " + profile.numa)
 
     print_section("BUILD")
-    println(s"Build started at $formatted_time")
-    println(s"Isabelle id $isabelle_id")
-    val pre_result = config.pre_hook()
+    println("Build started at " + formatted_time)
+    println("Isabelle id " + isabelle_id)
+    val pre_result = config.pre_hook(options)
 
     print_section("LOG")
     val (results, elapsed_time) = {
@@ -174,12 +170,12 @@ object CI_Build {
       val start_time = Time.now()
       val results = progress.interrupt_handler {
         Build.build(
-          options + "system_heaps",
+          build_options,
           selection = config.selection,
           progress = progress,
           clean_build = config.clean,
           numa_shuffling = profile.numa,
-          max_jobs = profile.jobs,
+          max_jobs = Some(profile.jobs),
           dirs = config.include,
           select_dirs = config.select)
       }
@@ -191,7 +187,7 @@ object CI_Build {
 
     val groups = results.sessions.map(results.info).flatMap(_.groups)
     for (group <- groups)
-      println(s"Group $group: " + compute_timing(results, Some(group)).message_resources)
+      println("Group " + group + ": " + compute_timing(results, Some(group)).message_resources)
 
     val total_timing = compute_timing(results, None).copy(elapsed = elapsed_time)
     println("Overall: " + total_timing.message_resources)
@@ -200,15 +196,15 @@ object CI_Build {
       print_section("FAILED SESSIONS")
 
       for (name <- results.sessions) {
-        if (results.cancelled(name)) println(s"Session $name: CANCELLED")
+        if (results.cancelled(name)) println("Session " + name + ": CANCELLED")
         else {
           val result = results(name)
-          if (!result.ok) println(s"Session $name: FAILED ${ result.rc }")
+          if (!result.ok) println("Session " + name + ": FAILED " + result.rc)
         }
       }
     }
 
-    val post_result = config.post_hook(results, start_time)
+    val post_result = config.post_hook(results, options, start_time)
 
     sys.exit(List(pre_result.rc, results.rc, post_result.rc).max)
   }
@@ -216,26 +212,33 @@ object CI_Build {
 
   /* Isabelle tool wrapper */
 
-  val isabelle_tool =
-    Isabelle_Tool(
-      "ci_build", "builds Isabelle jobs in ci environments", Scala_Project.here,
-      { args =>
-        val getopts = Getopts("""
-Usage: isabelle ci_build [JOB]
+  val isabelle_tool = Isabelle_Tool("ci_build", "builds Isabelle jobs in ci environments",
+    Scala_Project.here,
+    { args =>
+      /* arguments */
+
+      var options = Options.init()
+
+      val getopts = Getopts("""
+Usage: isabelle ci_build [OPTIONS] JOB
+
+  Options are:
+    -o OPTION    override Isabelle system OPTION (via NAME=VAL or NAME)
 
   Runs Isabelle builds in ci environment, with the following build jobs:
 
-""" + Library.indent_lines(4, show_jobs) + "\n")
+""" + Library.indent_lines(4, show_jobs) + "\n",
+        "o:" -> (arg => options = options + arg))
 
-        val more_args = getopts(args)
+      val more_args = getopts(args)
 
-        val job = more_args match {
-          case job :: Nil => the_job(job)
-          case _ => getopts.usage()
-        }
+      val job = more_args match {
+        case job :: Nil => the_job(job)
+        case _ => getopts.usage()
+      }
 
-        ci_build(job)
-      })
+      ci_build(options, job)
+    })
 }
 
 class Isabelle_CI_Builds(val jobs: CI_Build.Job*) extends Isabelle_System.Service

@@ -161,7 +161,8 @@ val param_of_inst = #1 oo get_inst_param;
 
 fun inst_thms ctxt =
   Symtab.fold
-    (Symtab.fold (cons o #2 o #2) o #2) (#1 (inst_params_of (Proof_Context.theory_of ctxt))) [];
+    (Symtab.fold (cons o #2 o #2) o #2) (#1 (inst_params_of (Proof_Context.theory_of ctxt))) []
+  |> map (Thm.transfer' ctxt);
 
 fun get_inst_tyco consts = try (#1 o dest_Type o the_single o Consts.typargs consts);
 
@@ -226,7 +227,7 @@ fun declare_overloaded (c, T) thy =
     val tyco = inst_tyco_of thy (c, T);
     val name_inst = instance_name (tyco, class) ^ "_inst";
     val c' = instance_name (tyco, c);
-    val T' = Type.strip_sorts T;
+    val T' = Term.strip_sortsT T;
   in
     thy
     |> Sign.qualified_path true (Binding.name name_inst)
@@ -380,7 +381,7 @@ fun define_class (bclass, raw_super) raw_params raw_specs thy =
       | [] => ()
       | _ => error ("Multiple type variables in class axiom:\n" ^ Syntax.string_of_term ctxt t);
       t
-      |> Term.map_types (Term.map_atyps (fn TFree _ => Term.aT [] | U => U))
+      |> (Term.map_types o Term.map_atyps_same) (fn TFree _ => Term.aT [] | _ => raise Same.SAME)
       |> Logic.close_form);
 
     val axiomss = map (map (prep_axiom o Sign.cert_prop thy) o snd) raw_specs;
@@ -393,10 +394,10 @@ fun define_class (bclass, raw_super) raw_params raw_specs thy =
     val class_eq =
       Logic.mk_equals (Logic.mk_of_class (Term.aT [], class), Logic.mk_conjunction_balanced conjs);
 
-    val ([def], def_thy) =
+    val (def, def_thy) =
       thy
       |> Sign.primitive_class (bclass, super)
-      |> Global_Theory.add_defs false [((Thm.def_binding bconst, class_eq), [])];
+      |> Global_Theory.add_def (Thm.def_binding bconst, class_eq);
     val (raw_intro, (raw_classrel, raw_axioms)) =
       split_defined (length conjs) def ||> chop (length super);
 

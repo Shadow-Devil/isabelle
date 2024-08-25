@@ -278,14 +278,54 @@ object Library {
       res.toList
     }
 
-  def the_single[A](xs: List[A]): A =
+  def the_single[A](xs: List[A], message: => String = "Single argument expected"): A =
     xs match {
       case List(x) => x
-      case _ => error("Single argument expected")
+      case _ => error(message)
     }
 
-  def symmetric_difference[A](xs: List[A], ys: List[A]): (List[A], List[A]) =
-    (xs.filterNot(ys.toSet), ys.filterNot(xs.toSet))
+
+  /* named items */
+
+  trait Named { def name: String }
+
+
+  /* data update */
+
+  object Update {
+    type Data[A] = Map[String, A]
+
+    sealed abstract class Op[A]
+    case class Delete[A](name: String) extends Op[A]
+    case class Insert[A](item: A) extends Op[A]
+
+    def data[A <: Named](old_data: Data[A], updates: List[Op[A]]): Data[A] =
+      updates.foldLeft(old_data) {
+        case (map, Delete(name)) => map - name
+        case (map, Insert(item)) => map + (item.name -> item)
+      }
+
+    val empty: Update = Update()
+
+    def make[A](a: Data[A], b: Data[A], kind: Int = 0): Update =
+      if (a eq b) empty
+      else {
+        val delete = List.from(for ((x, y) <- a.iterator if !b.get(x).contains(y)) yield x)
+        val insert = List.from(for ((x, y) <- b.iterator if !a.get(x).contains(y)) yield x)
+        Update(delete = delete, insert = insert, kind = kind)
+      }
+  }
+
+  sealed case class Update(
+    delete: List[String] = Nil,
+    insert: List[String] = Nil,
+    kind: Int = 0
+  ) {
+    def deletes: Boolean = delete.nonEmpty
+    def inserts: Boolean = insert.nonEmpty
+    def defined: Boolean = deletes || inserts
+    lazy val domain: Set[String] = delete.toSet ++ insert
+  }
 
 
   /* proper values */
@@ -318,9 +358,4 @@ object Library {
 
   def as_subclass[C](c: Class[C])(x: AnyRef): Option[C] =
     if (x == null || is_subclass(x.getClass, c)) Some(x.asInstanceOf[C]) else None
-
-
-  /* named items */
-
-  trait Named { def name: String }
 }

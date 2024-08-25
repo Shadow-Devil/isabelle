@@ -1,7 +1,7 @@
 /*  Title:      Pure/Tools/dotnet_setup.scala
     Author:     Makarius
 
-Dynamic setup of dotnet component.
+Dynamic setup of Dotnet component.
 */
 
 package isabelle
@@ -11,51 +11,38 @@ object Dotnet_Setup {
   /* platforms */
 
   sealed case class Platform_Info(
-    family: Platform.Family.Value,
-    name: String,
+    platform: String,
     os: String = "",
     arch: String = "x64",
     ext: String = "sh",
     exec: String = "bash",
-    check: () => Unit = () => ())
+    check: () => Unit = () => ()
+  ) extends Platform.Info
 
-  val all_platforms =
+  val all_platforms: List[Platform_Info] =
     List(
-      Platform_Info(Platform.Family.linux_arm, "arm64-linux", os = "linux", arch = "arm64"),
-      Platform_Info(Platform.Family.linux, "x86_64-linux", os = "linux"),
-      Platform_Info(Platform.Family.macos, "arm64-darwin", os = "osx", arch = "arm64"),
-      Platform_Info(Platform.Family.macos, "x86_64-darwin", os = "osx"),
-      Platform_Info(Platform.Family.windows, "x86_64-windows",
+      Platform_Info("arm64-linux", os = "linux", arch = "arm64"),
+      Platform_Info("x86_64-linux", os = "linux"),
+      Platform_Info("arm64-darwin", os = "osx", arch = "arm64"),
+      Platform_Info("x86_64-darwin", os = "osx"),
+      Platform_Info("x86_64-windows",
         ext = "ps1",
         exec = "powershell -ExecutionPolicy ByPass",
         check = () => Isabelle_System.require_command("powershell", "-NoProfile -Command Out-Null")))
 
-  def check_platform_spec(spec: String): String = {
-    val all_specs =
-      Library.distinct(all_platforms.map(_.family.toString) ::: all_platforms.map(_.name))
-    if (all_specs.contains(spec)) spec
-    else {
-      error("Bad platform specification " + quote(spec) +
-        "\n  expected " + commas_quote(all_specs))
-    }
-  }
+  def check_platform(spec: String): String = Platform.Info.check(all_platforms, spec)
 
 
   /* dotnet download and setup */
 
-  def default_platform: String = {
-    val self = Isabelle_Platform.self
-    proper_string(self.ISABELLE_WINDOWS_PLATFORM64).getOrElse(
-      proper_string(self.ISABELLE_APPLE_PLATFORM64).getOrElse(
-        self.ISABELLE_PLATFORM64))
-  }
-
+  def default_platform: String =
+    Isabelle_Platform.self.ISABELLE_PLATFORM(windows = true, apple = true)
   def default_target_dir: Path = Components.default_components_base
   def default_install_url: String = "https://dot.net/v1/dotnet-install"
-  def default_version: String = "6.0.411"
+  def default_version: String = Isabelle_System.getenv_strict("ISABELLE_DOTNET_VERSION")
 
   def dotnet_setup(
-    platform_spec: String = default_platform,
+    platforms: List[String] = List(default_platform),
     target_dir: Path = default_target_dir,
     install_url: String = default_install_url,
     version: String = default_version,
@@ -63,26 +50,20 @@ object Dotnet_Setup {
     dry_run: Boolean = false,
     progress: Progress = new Progress
   ): Unit = {
-    check_platform_spec(platform_spec)
-
-    for {
-      platform <- all_platforms
-      if platform.family.toString == platform_spec || platform.name == platform_spec
-    } {
-      progress.expose_interrupt()
+    platforms.foreach(check_platform)
 
 
-      /* component directory */
+    /* component directory */
 
-      val component_dir =
-        Components.Directory(
-          target_dir + Path.explode(if (version.isEmpty) "dotnet-latest" else "dotnet-" + version))
+    val component_dir =
+      Components.Directory(
+        target_dir + Path.explode(if (version.isEmpty) "dotnet-latest" else "dotnet-" + version))
 
-      if (!dry_run) {
-        progress.echo("Component " + component_dir)
-        Isabelle_System.make_directory(component_dir.etc)
+    if (!dry_run) {
+      progress.echo("Component directory " + component_dir)
+      component_dir.create(permissive = true)
 
-        component_dir.write_settings("""
+      component_dir.write_settings("""
 ISABELLE_DOTNET_ROOT="$COMPONENT"
 
 if [ -n "$ISABELLE_WINDOWS_PLATFORM64" -a -d "$ISABELLE_DOTNET_ROOT/$ISABELLE_WINDOWS_PLATFORM64" ]; then
@@ -97,32 +78,35 @@ DOTNET_CLI_TELEMETRY_OPTOUT="true"
 DOTNET_CLI_HOME="$(platform_path "$ISABELLE_HOME_USER/dotnet")"
 """)
 
-        File.write(component_dir.README,
-          """This installation of Dotnet has been produced via "isabelle dotnet_setup".
+      File.write(component_dir.README,
+        """This installation of Dotnet has been produced via "isabelle dotnet_setup".
 
 
-        Makarius
-        """ + Date.Format.date(Date.now()) + "\n")
+      Makarius
+      """ + Date.Format.date(Date.now()) + "\n")
 
-        for (old <- proper_string(Isabelle_System.getenv("ISABELLE_DOTNET_ROOT"))) {
-          Components.update_components(false, Path.explode(old))
-        }
-
-        Components.update_components(true, component_dir.path)
+      for (old <- proper_string(Isabelle_System.getenv("ISABELLE_DOTNET_ROOT"))) {
+        Components.update_components(false, Path.explode(old))
       }
 
+      Components.update_components(true, component_dir.path)
+    }
 
-      /* platform directory */
+
+    /* platform directories */
+
+    for (platform <- all_platforms if platforms.exists(platform.is)) {
+      progress.expose_interrupt()
 
       Isabelle_System.with_tmp_file("install", ext = platform.ext) { install =>
         Isabelle_System.download_file(install_url + "." + platform.ext, install)
 
-        val platform_dir = component_dir.path + Path.explode(platform.name)
+        val platform_dir = component_dir.path + platform.path
         if (platform_dir.is_dir && !force) {
-          progress.echo_warning("Platform " + platform.name + " already installed")
+          progress.echo_warning("Platform " + platform + " already installed")
         }
         else {
-          progress.echo("Platform " + platform.name + " ...")
+          progress.echo("Platform " + platform + " ...")
           platform.check()
           if (platform_dir.is_dir && force) Isabelle_System.rm_tree(platform_dir)
           val script =
@@ -130,7 +114,7 @@ DOTNET_CLI_HOME="$(platform_path "$ISABELLE_HOME_USER/dotnet")"
               if_proper(version, " -Version " + Bash.string(version)) +
               " -Architecture " + Bash.string(platform.arch) +
               if_proper(platform.os, " -OS " + Bash.string(platform.os)) +
-              " -InstallDir " + Bash.string(platform.name) +
+              " -InstallDir " + File.bash_path(platform.path) +
               (if (dry_run) " -DryRun" else "") +
               " -NoPath"
           progress.bash(script, echo = progress.verbose,
@@ -147,7 +131,7 @@ DOTNET_CLI_HOME="$(platform_path "$ISABELLE_HOME_USER/dotnet")"
   /* Isabelle tool wrapper */
 
   val isabelle_tool =
-    Isabelle_Tool("dotnet_setup", "dynamic setup of dotnet component (for Fsharp)",
+    Isabelle_Tool("dotnet_setup", "dynamic setup of Dotnet component (for Fsharp)",
       Scala_Project.here,
       { args =>
 
@@ -166,10 +150,11 @@ Usage: isabelle dotnet_setup [OPTIONS]
     -D DIR       target directory (default: """ + default_target_dir.expand + """)
     -I URL       URL for install script without extension
                  (default: """ + quote(default_install_url) + """)
-    -V VERSION   version (empty means "latest", default: """ + quote(default_version) + """)
+    -V VERSION   version: empty means "latest"
+                 (default: ISABELLE_DOTNET_VERSION=""" + quote(default_version) + """)
     -f           force fresh installation of specified platforms
     -n           dry run: try download without installation
-    -p PLATFORMS comma-separated list of platform specifications,
+    -p PLATFORMS comma-separated list of platform specifications: "all" or
                  as family or formal name (default: """ + quote(default_platform) + """)
     -v           verbose
 
@@ -185,7 +170,7 @@ Usage: isabelle dotnet_setup [OPTIONS]
           "V:" -> (arg => version = arg),
           "f" -> (_ => force = true),
           "n" -> (_ => dry_run = true),
-          "p:" -> (arg => platforms = space_explode(',', arg).map(check_platform_spec)),
+          "p:" -> (arg => platforms = space_explode(',', arg).map(check_platform)),
           "v" -> (_ => verbose = true))
 
         val more_args = getopts(args)
@@ -193,9 +178,11 @@ Usage: isabelle dotnet_setup [OPTIONS]
 
         val progress = new Console_Progress(verbose = verbose)
 
-        for (platform <- platforms) {
-          dotnet_setup(platform_spec = platform, target_dir = target_dir, install_url = install_url,
-            version = version, force = force, dry_run = dry_run, progress = progress)
-        }
+        dotnet_setup(platforms = platforms, target_dir = target_dir, install_url = install_url,
+          version = version, force = force, dry_run = dry_run, progress = progress)
       })
+}
+
+class Dotnet_Setup extends Setup_Tool("dotnet_setup", "ISABELLE_DOTNET_SETUP") {
+  override val test_file: Path = Path.explode("lib/Tools/dotnet")
 }

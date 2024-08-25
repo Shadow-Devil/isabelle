@@ -190,7 +190,7 @@ fun print_classes ctxt =
         val Ss = Sorts.mg_domain algebra tyco [class];
       in Syntax.pretty_arity ctxt (tyco, Ss, [class]) end;
 
-    fun prt_param (c, ty) = pretty_param ctxt (c, Type.strip_sorts_dummy ty);
+    fun prt_param (c, ty) = pretty_param ctxt (c, Term.smash_sortsT dummyS ty);
 
     fun prt_entry class =
       Pretty.block
@@ -245,10 +245,11 @@ fun activate_defs context class thms thy =
 fun register_operation class (c, t) input_only thy =
   let
     val base_sort = base_sort thy class;
-    val prep_typ = map_type_tfree
-      (fn (v, sort) => if Name.aT = v
-        then TFree (v, base_sort) else TVar ((v, 0), sort));
-    val t' = map_types prep_typ t;
+    val prep_types =
+      (Same.commit o Term.map_types_same o Term.map_atyps_same)
+        (fn TFree (v, S) => if Name.aT = v then TFree (v, base_sort) else TVar ((v, 0), S)
+          | _ => raise Same.SAME);
+    val t' = prep_types t;
     val ty' = Term.fastype_of t';
   in
     thy
@@ -394,11 +395,10 @@ fun canonical_const class phi dangling_params ((b, mx), rhs) thy =
     val b_def = Binding.suffix_name "_dict" b;
     val c = Sign.full_name thy b;
     val ty = map Term.fastype_of dangling_params ---> Term.fastype_of rhs;
-    val def_eq = Logic.mk_equals (list_comb (Const (c, ty), dangling_params), rhs)
-      |> map_types Type.strip_sorts;
+    val def_eq = Term.strip_sorts (Logic.mk_equals (list_comb (Const (c, ty), dangling_params), rhs));
   in
     thy
-    |> Sign.declare_const_global ((b, Type.strip_sorts ty), mx)
+    |> Sign.declare_const_global ((b, Term.strip_sortsT ty), mx)
     |> snd
     |> global_def (b_def, def_eq)
     |-> (fn def_thm => register_def class def_thm)
@@ -429,9 +429,11 @@ local
 fun canonical_abbrev class phi prmode with_syntax ((b, mx), rhs) thy =
   let
     val c = Sign.full_name thy b;
-    val constrain = map_atyps (fn T as TFree (v, _) =>
-      if v = Name.aT then TFree (v, [class]) else T | T => T);
-    val rhs' = map_types constrain rhs;
+    val constrain =
+      (Term.map_types o Term.map_atyps_same)
+        (fn TFree (a, _) => if a = Name.aT then TFree (a, [class]) else raise Same.SAME
+          | _ => raise Same.SAME);
+    val rhs' = constrain rhs;
   in
     thy
     |> Sign.add_abbrev (#1 prmode) (b, Logic.varify_types_global rhs')
@@ -615,9 +617,14 @@ fun resort_terms ctxt algebra consts constraints ts =
       | matchings _ = I;
     val tvartab = Vartab.build ((fold o fold_aterms) matchings ts)
       handle Sorts.CLASS_ERROR e => error (Sorts.class_error (Context.Proof ctxt) e);
-    val inst = map_type_tvar
-      (fn (vi, sort) => TVar (vi, the_default sort (Vartab.lookup tvartab vi)));
-  in if Vartab.is_empty tvartab then ts else (map o map_types) inst ts end;
+    val inst_same =
+      (Same.map o Term.map_types_same o Term.map_atyps_same)
+        (fn TVar (vi, S) =>
+            (case Vartab.lookup tvartab vi of
+              SOME S' => if S = S' then raise Same.SAME else TVar (vi, S')
+            | NONE => raise Same.SAME)
+          | _ => raise Same.SAME);
+  in if Vartab.is_empty tvartab then ts else Same.commit inst_same ts end;
 
 
 (* target *)

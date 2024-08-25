@@ -75,9 +75,9 @@ fun robust_context NONE _ _ = []
 
 fun identify exn =
   let
-    val exn' = Par_Exn.identify [] exn;
+    val exn' = Exn_Properties.identify [] exn;
     val exec_id = Properties.get (Exn_Properties.get exn') Markup.exec_idN;
-    val i = Par_Exn.the_serial exn' handle Option.Option => serial ();
+    val i = Exn_Properties.the_serial exn' handle Option.Option => serial ();
   in ((i, exn'), exec_id) end;
 
 fun flatten _ (CONTEXT (ctxt, exn)) = flatten (SOME ctxt) exn
@@ -197,17 +197,16 @@ fun controlled_execution opt_context f x =
   (f |> debugging opt_context |> Future.interruptible_task
     |> ML_Profiling.profile (Options.default_string "profiling")) x;
 
-fun toplevel_error output_exn f x = f x
-  handle exn =>
-    if Exn.is_interrupt exn then Exn.reraise exn
-    else
+fun toplevel_error output_exn f x =
+  Isabelle_Thread.try_catch (fn () => f x)
+    (fn exn =>
       let
         val opt_ctxt =
           (case Context.get_generic_context () of
             NONE => NONE
           | SOME context => try Context.proof_of context);
         val _ = output_exn (exn_context opt_ctxt exn);
-      in raise TOPLEVEL_ERROR end;
+      in raise TOPLEVEL_ERROR end);
 
 fun toplevel_program body =
   (body |> controlled_execution NONE |> toplevel_error exn_error_message) ();

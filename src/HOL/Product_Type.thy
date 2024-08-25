@@ -987,6 +987,10 @@ lemma fst_swap [simp]: "fst (prod.swap x) = snd x"
 lemma snd_swap [simp]: "snd (prod.swap x) = fst x"
   by (cases x) simp
 
+lemma split_pairs:
+  "(A,B) = X \<longleftrightarrow> fst X = A \<and> snd X = B" and "X = (A,B) \<longleftrightarrow> fst X = A \<and> snd X = B" 
+  by auto
+
 text \<open>Disjoint union of a family of sets -- Sigma.\<close>
 
 definition Sigma :: "'a set \<Rightarrow> ('a \<Rightarrow> 'b set) \<Rightarrow> ('a \<times> 'b) set"
@@ -1162,6 +1166,9 @@ lemma insert_Times_insert [simp]:
   "insert a A \<times> insert b B = insert (a,b) (A \<times> insert b B \<union> {a} \<times> B)"
   by blast
 
+lemma sing_Times_sing: "{x}\<times>{y} = {(x,y)}"
+  by simp
+
 lemma vimage_Times: "f -` (A \<times> B) = (fst \<circ> f) -` A \<inter> (snd \<circ> f) -` B"
 proof (rule set_eqI)
   show "x \<in> f -` (A \<times> B) \<longleftrightarrow> x \<in> (fst \<circ> f) -` A \<inter> (snd \<circ> f) -` B" for x
@@ -1303,12 +1310,11 @@ subsection \<open>Simproc for rewriting a set comprehension into a pointfree exp
 
 ML_file \<open>Tools/set_comprehension_pointfree.ML\<close>
 
-setup \<open>
-  Code_Preproc.map_pre (fn ctxt => ctxt addsimprocs
-    [Simplifier.make_simproc \<^context> "set comprehension"
-      {lhss = [\<^term>\<open>Collect P\<close>],
-       proc = K Set_Comprehension_Pointfree.code_simproc}])
-\<close>
+simproc_setup passive set_comprehension ("Collect P") =
+  \<open>K Set_Comprehension_Pointfree.code_proc\<close>
+
+setup \<open>Code_Preproc.map_pre (fn ctxt => ctxt addsimprocs [\<^simproc>\<open>set_comprehension\<close>])\<close>
+
 
 subsection \<open>Lemmas about disjointness\<close>
 

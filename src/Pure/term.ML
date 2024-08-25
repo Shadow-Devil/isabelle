@@ -68,11 +68,11 @@ sig
   val head_of: term -> term
   val size_of_term: term -> int
   val size_of_typ: typ -> int
-  val map_atyps: (typ -> typ) -> typ -> typ
-  val map_aterms: (term -> term) -> term -> term
-  val map_type_tvar: (indexname * sort -> typ) -> typ -> typ
-  val map_type_tfree: (string * sort -> typ) -> typ -> typ
-  val map_types: (typ -> typ) -> term -> term
+  val map_atyps: typ Same.operation -> typ -> typ
+  val map_aterms: term Same.operation -> term -> term
+  val map_types: typ Same.operation -> term -> term
+  val map_type_tvar: (indexname * sort, typ) Same.function -> typ -> typ
+  val map_type_tfree: (string * sort, typ) Same.function -> typ -> typ
   val fold_atyps: (typ -> 'a -> 'a) -> typ -> 'a -> 'a
   val fold_atyps_sorts: (typ * sort -> 'a -> 'a) -> typ -> 'a -> 'a
   val fold_aterms: (term -> 'a -> 'a) -> term -> 'a -> 'a
@@ -83,12 +83,14 @@ sig
   val propT: typ
   val strip_all_body: term -> term
   val strip_all_vars: term -> (string * typ) list
-  val incr_bv: int * int * term -> term
+  val incr_bv_same: int -> int -> term Same.operation
+  val incr_bv: int -> int -> term -> term
   val incr_boundvars: int -> term -> term
   val add_loose_bnos: term * int * int list -> int list
   val loose_bnos: term -> int list
   val loose_bvar: term * int -> bool
   val loose_bvar1: term * int -> bool
+  val subst_bounds_same: term list -> int -> term Same.operation
   val subst_bounds: term list * term -> term
   val subst_bound: term * term -> term
   val betapply: term * term -> term
@@ -120,6 +122,9 @@ end;
 signature TERM =
 sig
   include BASIC_TERM
+  val map_atyps_same: typ Same.operation -> typ Same.operation
+  val map_aterms_same: term Same.operation -> term Same.operation
+  val map_types_same: typ Same.operation -> term Same.operation
   val aT: sort -> typ
   val itselfT: typ -> typ
   val a_itselfT: typ
@@ -145,6 +150,12 @@ sig
   val declare_term_names: term -> Name.context -> Name.context
   val declare_term_frees: term -> Name.context -> Name.context
   val variant_frees: term -> (string * 'a) list -> (string * 'a) list
+  val smash_sortsT_same: sort -> typ Same.operation
+  val smash_sortsT: sort -> typ -> typ
+  val smash_sorts: sort -> term -> term
+  val strip_sortsT_same: typ Same.operation
+  val strip_sortsT: typ -> typ
+  val strip_sorts: term -> term
   val rename_wrt_term: term -> (string * 'a) list -> (string * 'a) list
   val eq_ix: indexname * indexname -> bool
   val eq_tvar: (indexname * sort) * (indexname * sort) -> bool
@@ -390,29 +401,27 @@ fun argument_type_of tm k =
 
 fun abs (x, T) t = Abs (x, T, t);
 
-fun strip_abs (Abs (a, T, t)) =
-      let val (a', t') = strip_abs t
-      in ((a, T) :: a', t') end
+fun strip_abs (Abs (a, T, t)) = strip_abs t |>> cons (a, T)
   | strip_abs t = ([], t);
 
-(*maps  (x1,...,xn)t   to   t*)
-fun strip_abs_body (Abs(_,_,t))  =  strip_abs_body t
-  | strip_abs_body u  =  u;
+fun strip_abs_body (Abs (_, _, t)) = strip_abs_body t
+  | strip_abs_body t = t;
 
-(*maps  (x1,...,xn)t   to   [x1, ..., xn]*)
-fun strip_abs_vars (Abs(a,T,t))  =  (a,T) :: strip_abs_vars t
-  | strip_abs_vars u  =  [] : (string*typ) list;
+fun strip_abs_vars (Abs (a, T, t)) = strip_abs_vars t |> cons (a, T)
+  | strip_abs_vars _ = [];
 
 
 fun strip_qnt_body qnt =
-let fun strip(tm as Const(c,_)$Abs(_,_,t)) = if c=qnt then strip t else tm
-      | strip t = t
-in strip end;
+  let
+    fun strip (tm as Const (c, _) $ Abs (_, _, t)) = if c = qnt then strip t else tm
+      | strip t = t;
+  in strip end;
 
 fun strip_qnt_vars qnt =
-let fun strip(Const(c,_)$Abs(a,T,t)) = if c=qnt then (a,T)::strip t else []
-      | strip t  =  [] : (string*typ) list
-in strip end;
+  let
+    fun strip (Const (c, _) $ Abs (a, T, t)) = if c = qnt then (a, T) :: strip t else []
+      | strip _ = [];
+  in strip end;
 
 
 (*maps   (f, [t1,...,tn])  to  f(t1,...,tn)*)
@@ -420,19 +429,21 @@ val list_comb : term * term list -> term = Library.foldl (op $);
 
 
 (*maps   f(t1,...,tn)  to  (f, [t1,...,tn]) ; naturally tail-recursive*)
-fun strip_comb u : term * term list =
-    let fun stripc (f$t, ts) = stripc (f, t::ts)
-        |   stripc  x =  x
-    in  stripc(u,[])  end;
+fun strip_comb tm =
+  let
+    fun strip (f $ t, ts) = strip (f, t :: ts)
+      | strip res = res;
+  in strip (tm, []) end;
 
-fun args_of u =
-    let fun args (f $ x) xs = args f (x :: xs)
-        |   args _ xs = xs
-    in args u [] end;
+val args_of =
+  let
+    fun args (f $ t) ts = args f (t :: ts)
+      | args _ ts = ts;
+  in build o args end;
 
 (*maps   f(t1,...,tn)  to  f , which is never a combination*)
-fun head_of (f$t) = head_of f
-  | head_of u = u;
+fun head_of (f $ _) = head_of f
+  | head_of t = t;
 
 (*number of atoms and abstractions in a term*)
 fun size_of_term tm =
@@ -449,25 +460,44 @@ fun size_of_typ ty =
       | add_size _ n = n + 1;
   in add_size ty 0 end;
 
-fun map_atyps f (Type (a, Ts)) = Type (a, map (map_atyps f) Ts)
-  | map_atyps f T = f T;
 
-fun map_aterms f (t $ u) = map_aterms f t $ map_aterms f u
-  | map_aterms f (Abs (a, T, t)) = Abs (a, T, map_aterms f t)
-  | map_aterms f t = f t;
+(* map types and terms *)
 
-fun map_type_tvar f = map_atyps (fn TVar x => f x | T => T);
-fun map_type_tfree f = map_atyps (fn TFree x => f x | T => T);
-
-fun map_types f =
+fun map_atyps_same f =
   let
-    fun map_aux (Const (a, T)) = Const (a, f T)
-      | map_aux (Free (a, T)) = Free (a, f T)
-      | map_aux (Var (v, T)) = Var (v, f T)
-      | map_aux (Bound i) = Bound i
-      | map_aux (Abs (a, T, t)) = Abs (a, f T, map_aux t)
-      | map_aux (t $ u) = map_aux t $ map_aux u;
-  in map_aux end;
+    fun typ (Type (a, Ts)) = Type (a, Same.map typ Ts)
+      | typ T = f T;
+  in typ end;
+
+fun map_aterms_same f =
+  let
+    fun term (Abs (x, T, t)) = Abs (x, T, term t)
+      | term (t $ u) =
+          (term t $ Same.commit term u
+            handle Same.SAME => t $ term u)
+      | term a = f a;
+  in term end;
+
+fun map_types_same f =
+  let
+    fun term (Const (c, T)) = Const (c, f T)
+      | term (Free (x, T)) = Free (x, f T)
+      | term (Var (xi, T)) = Var (xi, f T)
+      | term (Bound _) = raise Same.SAME
+      | term (Abs (x, T, t)) =
+          (Abs (x, f T, Same.commit term t)
+            handle Same.SAME => Abs (x, T, term t))
+      | term (t $ u) =
+          (term t $ Same.commit term u
+            handle Same.SAME => t $ term u);
+  in term end;
+
+val map_atyps = Same.commit o map_atyps_same;
+val map_aterms = Same.commit o map_aterms_same;
+val map_types = Same.commit o map_types_same;
+
+fun map_type_tvar f = map_atyps (fn TVar x => f x | _ => raise Same.SAME);
+fun map_type_tfree f = map_atyps (fn TFree x => f x | _ => raise Same.SAME);
 
 
 (* fold types and terms *)
@@ -557,6 +587,21 @@ fun variant_frees t frees =
 fun rename_wrt_term t frees = rev (variant_frees t frees);  (*reversed result!*)
 
 
+(* sorts *)
+
+fun smash_sortsT_same S' =
+  map_atyps_same
+    (fn TFree (x, S) => if S = S' then raise Same.SAME else TFree (x, S')
+      | TVar (xi, S) => if S = S' then raise Same.SAME else TVar (xi, S'));
+
+val smash_sortsT = Same.commit o smash_sortsT_same;
+val smash_sorts = map_types o smash_sortsT_same;
+
+val strip_sortsT_same = smash_sortsT_same [];
+val strip_sortsT = Same.commit strip_sortsT_same;
+val strip_sorts = map_types strip_sortsT_same;
+
+
 
 (** Comparing terms **)
 
@@ -630,39 +675,48 @@ fun strip_all_vars (Const ("Pure.all", _) $ Abs (a, T, t)) = (a, T) :: strip_all
   required when moving a term within abstractions
      inc is  increment for bound variables
      lev is  level at which a bound variable is considered 'loose'*)
-fun incr_bv (inc, lev, u as Bound i) = if i>=lev then Bound(i+inc) else u
-  | incr_bv (inc, lev, Abs(a,T,body)) =
-        Abs(a, T, incr_bv(inc,lev+1,body))
-  | incr_bv (inc, lev, f$t) =
-      incr_bv(inc,lev,f) $ incr_bv(inc,lev,t)
-  | incr_bv (inc, lev, u) = u;
+fun incr_bv_same inc =
+  if inc = 0 then fn _ => Same.same
+  else
+    let
+      fun term lev (Bound i) =
+            if i >= lev then Bound (i + inc) else raise Same.SAME
+        | term lev (Abs (a, T, t)) = Abs (a, T, term (lev + 1) t)
+        | term lev (t $ u) =
+            (term lev t $ Same.commit (term lev) u
+              handle Same.SAME => t $ term lev u)
+        | term _ _ = raise Same.SAME;
+    in term end;
 
-fun incr_boundvars  0  t = t
-  | incr_boundvars inc t = incr_bv(inc,0,t);
+fun incr_bv inc lev = Same.commit (incr_bv_same inc lev);
 
-(*Scan a pair of terms; while they are similar,
-  accumulate corresponding bound vars in "al"*)
-fun match_bvs(Abs(x,_,s),Abs(y,_,t), al) =
-      match_bvs(s, t, if x="" orelse y="" then al
-                                          else (x,y)::al)
-  | match_bvs(f$s, g$t, al) = match_bvs(f,g,match_bvs(s,t,al))
-  | match_bvs(_,_,al) = al;
+fun incr_boundvars inc = incr_bv inc 0;
+
+(*Scan a pair of terms; while they are similar, accumulate corresponding bound vars*)
+fun match_bvs (Abs (x, _, s), Abs (y, _, t)) =
+      (x <> "" andalso y <> "") ? cons (x, y) #> match_bvs (s, t)
+  | match_bvs (f $ s, g $ t) = match_bvs (s, t) #> match_bvs (f, g)
+  | match_bvs _ = I;
 
 (* strip abstractions created by parameters *)
-fun match_bvars (s,t) al = match_bvs(strip_abs_body s, strip_abs_body t, al);
+val match_bvars = apply2 strip_abs_body #> match_bvs;
 
-fun map_abs_vars f (t $ u) = map_abs_vars f t $ map_abs_vars f u
-  | map_abs_vars f (Abs (a, T, t)) = Abs (f a, T, map_abs_vars f t)
-  | map_abs_vars f t = t;
+fun map_abs_vars_same rename =
+  let
+    fun term (Abs (x, T, t)) =
+          let val y = rename x
+          in if x = y then Abs (x, T, term t) else Abs (y, T, Same.commit term t) end
+      | term (t $ u) = (term t $ Same.commit term u handle Same.SAME => t $ term u)
+      | term _ = raise Same.SAME;
+  in term end;
+
+fun map_abs_vars rename = Same.commit (map_abs_vars_same rename);
 
 fun rename_abs pat obj t =
   let
-    val ren = match_bvs (pat, obj, []);
-    fun ren_abs (Abs (x, T, b)) =
-          Abs (the_default x (AList.lookup (op =) ren x), T, ren_abs b)
-      | ren_abs (f $ t) = ren_abs f $ ren_abs t
-      | ren_abs t = t
-  in if null ren then NONE else SOME (ren_abs t) end;
+    val renaming = Symtab.make_distinct (match_bvs (pat, obj) []);
+    fun rename x = perhaps (Symtab.lookup renaming) x;
+  in if Symtab.forall (op =) renaming then NONE else Same.catch (map_abs_vars_same rename) t end;
 
 (*Accumulate all 'loose' bound vars referring to level 'lev' or beyond.
    (Bound 0) is loose at level 0 *)
@@ -697,33 +751,38 @@ fun is_dependent t = loose_bvar1 (t, 0);
   Loose bound variables >=n are reduced by "n" to
      compensate for the disappearance of lambdas.
 *)
-fun subst_bounds (args: term list, t) : term =
-  let
-    val n = length args;
-    fun subst (t as Bound i, lev) =
-         (if i < lev then raise Same.SAME   (*var is locally bound*)
-          else incr_boundvars lev (nth args (i - lev))
-            handle General.Subscript => Bound (i - n))  (*loose: change it*)
-      | subst (Abs (a, T, body), lev) = Abs (a, T, subst (body, lev + 1))
-      | subst (f $ t, lev) =
-          (subst (f, lev) $ (subst (t, lev) handle Same.SAME => t)
-            handle Same.SAME => f $ subst (t, lev))
-      | subst _ = raise Same.SAME;
-  in case args of [] => t | _ => (subst (t, 0) handle Same.SAME => t) end;
+fun subst_bounds_same args =
+  if null args then fn _ => Same.same
+  else
+    let
+      val n = length args;
+      fun term lev (Bound i) =
+            if i < lev then raise Same.SAME   (*var is locally bound*)
+            else if i - lev < n then incr_boundvars lev (nth args (i - lev))
+            else Bound (i - n)  (*loose: change it*)
+        | term lev (Abs (a, T, t)) = Abs (a, T, term (lev + 1) t)
+        | term lev (t $ u) =
+            (term lev t $ Same.commit (term lev) u
+              handle Same.SAME => t $ term lev u)
+        | term _ _ = raise Same.SAME;
+    in term end;
+
+fun subst_bounds (args: term list, body) : term =
+  if null args then body else Same.commit (subst_bounds_same args 0) body;
 
 (*Special case: one argument*)
-fun subst_bound (arg, t) : term =
+fun subst_bound (arg, body) : term =
   let
-    fun subst (Bound i, lev) =
+    fun term lev (Bound i) =
           if i < lev then raise Same.SAME   (*var is locally bound*)
           else if i = lev then incr_boundvars lev arg
           else Bound (i - 1)   (*loose: change it*)
-      | subst (Abs (a, T, body), lev) = Abs (a, T, subst (body, lev + 1))
-      | subst (f $ t, lev) =
-          (subst (f, lev) $ (subst (t, lev) handle Same.SAME => t)
-            handle Same.SAME => f $ subst (t, lev))
-      | subst _ = raise Same.SAME;
-  in subst (t, 0) handle Same.SAME => t end;
+      | term lev (Abs (a, T, t)) = Abs (a, T, term (lev + 1) t)
+      | term lev (t $ u) =
+          (term lev t $ Same.commit (term lev) u
+            handle Same.SAME => t $ term lev u)
+      | term _ _ = raise Same.SAME;
+  in Same.commit (term 0) body end;
 
 (*beta-reduce if possible, else form application*)
 fun betapply (Abs(_,_,t), u) = subst_bound (u,t)
@@ -773,16 +832,16 @@ fun subst_free [] = I
   The resulting term is ready to become the body of an Abs.*)
 fun abstract_over (v, body) =
   let
-    fun abs lev tm =
+    fun term lev tm =
       if v aconv tm then Bound lev
       else
         (case tm of
-          Abs (a, T, t) => Abs (a, T, abs (lev + 1) t)
+          Abs (a, T, t) => Abs (a, T, term (lev + 1) t)
         | t $ u =>
-            (abs lev t $ (abs lev u handle Same.SAME => u)
-              handle Same.SAME => t $ abs lev u)
+            (term lev t $ Same.commit (term lev) u
+              handle Same.SAME => t $ term lev u)
         | _ => raise Same.SAME);
-  in abs 0 body handle Same.SAME => body end;
+  in Same.commit (term 0) body end;
 
 fun term_name (Const (x, _)) = Long_Name.base_name x
   | term_name (Free (x, _)) = x

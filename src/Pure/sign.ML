@@ -11,7 +11,7 @@ sig
   val change_end: theory -> theory
   val change_end_local: Proof.context -> Proof.context
   val change_check: theory -> theory
-  val syn_of: theory -> Syntax.syntax
+  val syntax_of: theory -> Syntax.syntax
   val tsig_of: theory -> Type.tsig
   val classes_of: theory -> Sorts.algebra
   val all_classes: theory -> class list
@@ -23,7 +23,9 @@ sig
   val subsort: theory -> sort * sort -> bool
   val of_sort: theory -> typ * sort -> bool
   val inter_sort: theory -> sort * sort -> sort
-  val witness_sorts: theory -> (typ * sort) list -> sort list -> (typ * sort) list
+  val witness_sorts: theory ->
+    (typ * sort) list -> sort Ord_List.T ->
+    (typ * sort) list * sort Ord_List.T
   val logical_types: theory -> string list
   val typ_instance: theory -> typ * typ -> bool
   val typ_equiv: theory -> typ * typ -> bool
@@ -43,6 +45,7 @@ sig
   val full_name_path: theory -> string -> binding -> string
   val full_bname: theory -> bstring -> string
   val full_bname_path: theory -> string -> bstring -> string
+  val full_name_pos: theory -> binding -> string * Position.T
   val const_monomorphic: theory -> string -> bool
   val const_typargs: theory -> string * typ -> typ list
   val const_instance: theory -> string * typ list -> typ
@@ -61,8 +64,9 @@ sig
   val certify_sort: theory -> sort -> sort
   val certify_typ: theory -> typ -> typ
   val certify_typ_mode: Type.mode -> theory -> typ -> typ
-  val certify': bool -> Context.generic -> bool -> Consts.T -> theory -> term -> term * typ * int
-  val certify_term: theory -> term -> term * typ * int
+  val certify_flags: {prop: bool, normalize: bool} -> Context.generic -> Consts.T -> theory ->
+    term -> term * typ
+  val certify_term: theory -> term -> term * typ
   val cert_term: theory -> term -> term
   val cert_prop: theory -> term -> term
   val no_frees: Proof.context -> term -> term
@@ -172,7 +176,7 @@ fun change_check thy =
 
 (* syntax *)
 
-val syn_of = #syn o rep_sg;
+val syntax_of = #syn o rep_sg;
 
 
 (* type signature *)
@@ -203,7 +207,7 @@ val typ_unify = Type.unify o tsig_of;
 
 val consts_of = #consts o rep_sg;
 val the_const_constraint = Consts.the_constraint o consts_of;
-val the_const_type = #2 oo (Consts.the_const o consts_of);
+val the_const_type = Consts.the_const_type o consts_of;
 val const_type = try o the_const_type;
 val const_monomorphic = Consts.is_monomorphic o consts_of;
 val const_typargs = Consts.typargs o consts_of;
@@ -227,6 +231,8 @@ fun full_name_path thy path = Name_Space.full_name (Name_Space.add_path path (na
 
 fun full_bname thy = Name_Space.full_name (naming_of thy) o Binding.name;
 fun full_bname_path thy path = full_name_path thy path o Binding.name;
+
+fun full_name_pos thy b = (full_name thy b, Binding.default_pos_of b);
 
 
 
@@ -254,8 +260,8 @@ fun arity_sorts thy = Type.arity_sorts (Context.Theory thy) (tsig_of thy);
 
 val certify_class = Type.cert_class o tsig_of;
 val certify_sort = Type.cert_sort o tsig_of;
-val certify_typ = Type.cert_typ o tsig_of;
-fun certify_typ_mode mode = Type.cert_typ_mode mode o tsig_of;
+fun certify_typ_mode mode = Type.certify_typ mode o tsig_of;
+val certify_typ = certify_typ_mode Type.mode_default;
 
 
 (* certify term/prop *)
@@ -299,21 +305,32 @@ fun check_vars (t $ u) = (check_vars t; check_vars u)
 
 in
 
-fun certify' prop context do_expand consts thy tm =
+fun certify_flags {prop, normalize} context consts thy tm =
   let
-    val _ = check_vars tm;
-    val tm' = Term.map_types (certify_typ thy) tm;
-    val T = type_check context tm';
-    val _ = if prop andalso T <> propT then err "Term not of type prop" else ();
-    val tm'' = tm'
-      |> Consts.certify context (tsig_of thy) do_expand consts
-      |> Soft_Type_System.global_purge thy;
-  in (if tm = tm'' then tm else tm'', T, Term.maxidx_of_term tm'') end;
+    val tsig = tsig_of thy;
+    fun check_term t =
+      let
+        val _ = check_vars t;
+        val t' = Type.certify_types Type.mode_default tsig t;
+        val T = type_check context t';
+        val t'' = Consts.certify {normalize = normalize} context tsig consts t';
+      in if prop andalso T <> propT then err "Term not of type prop" else (t'', T) end;
 
-fun certify_term thy = certify' false (Context.Theory thy) true (consts_of thy) thy;
-fun cert_term_abbrev thy = #1 o certify' false (Context.Theory thy) false (consts_of thy) thy;
+    val (tm1, ty1) = check_term tm;
+    val tm' = Soft_Type_System.global_purge thy tm1;
+    val (tm2, ty2) = if tm1 = tm' then (tm1, ty1) else check_term tm';
+  in if tm = tm2 then (tm, ty2) else (tm2, ty2) end;
+
+fun certify_term thy =
+  certify_flags {prop = false, normalize = true} (Context.Theory thy) (consts_of thy) thy;
+
+fun cert_term_abbrev thy =
+  #1 o certify_flags {prop = false, normalize = false} (Context.Theory thy) (consts_of thy) thy;
+
 val cert_term = #1 oo certify_term;
-fun cert_prop thy = #1 o certify' true (Context.Theory thy) true (consts_of thy) thy;
+
+fun cert_prop thy =
+  #1 o certify_flags {prop = true, normalize = true} (Context.Theory thy) (consts_of thy) thy;
 
 end;
 

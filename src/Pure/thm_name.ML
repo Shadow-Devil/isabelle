@@ -12,8 +12,9 @@ sig
   type T = string * int
   val ord: T ord
   val print: T -> string
-  val flatten: T -> string
-  val make_list: string -> thm list -> (T * thm) list
+  val short: T * Position.T -> string * Position.T
+  val list: string * Position.T -> 'a list -> ((T * Position.T) * 'a) list
+  val expr: string * Position.T -> ('a list * 'b) list -> (((T * Position.T) * 'a) list * 'b) list
 end;
 
 structure Thm_Name: THM_NAME =
@@ -26,11 +27,13 @@ fun print (name, index) =
   if name = "" orelse index = 0 then name
   else name ^ enclose "(" ")" (string_of_int index);
 
-fun flatten (name, index) =
-  if name = "" orelse index = 0 then name
-  else name ^ "_" ^ string_of_int index;
+fun short ((name, index), pos: Position.T) =
+  if name = "" orelse index = 0 then (name, pos)
+  else (name ^ "_" ^ string_of_int index, pos);
 
-fun make_list name [thm: thm] = [((name, 0), thm)]
-  | make_list name thms = map_index (fn (i, thm) => ((name, i + 1), thm)) thms;
+fun list (name, pos: Position.T) [thm] = [(((name, 0): T, pos), thm)]
+  | list (name, pos) thms = map_index (fn (i, thm) => (((name, i + 1), pos), thm)) thms;
+
+fun expr name = burrow_fst (burrow (list name));
 
 end;

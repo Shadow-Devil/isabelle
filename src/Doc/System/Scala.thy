@@ -46,7 +46,8 @@ text \<open>
   \<^medskip>
   There is also an implicit build process for Isabelle/Scala/Java modules,
   based on \<^path>\<open>etc/build.props\<close> within the component directory (see also
-  \secref{sec:scala-build}).
+  \secref{sec:scala-build}). See \<^file>\<open>$ISABELLE_HOME/src/Tools/Demo/README.md\<close>
+  for an example components with command-line tools in Isabelle/Scala.
 \<close>
 
 
@@ -95,27 +96,6 @@ options.string("document")\<close>}
 \<close>
 
 
-subsection \<open>Scala script wrapper\<close>
-
-text \<open>
-  The executable @{executable "$ISABELLE_HOME/bin/isabelle_scala_script"}
-  allows to run Isabelle/Scala source files stand-alone programs, by using a
-  suitable ``hash-bang'' line and executable file permissions. For example:
-  @{verbatim [display, indent = 2] \<open>#!/usr/bin/env isabelle_scala_script\<close>}
-  @{scala [display, indent = 2]
-\<open>val options = isabelle.Options.init()
-Console.println("browser_info = " + options.bool("browser_info"))
-Console.println("document = " + options.string("document"))\<close>}
-
-  This assumes that the executable may be found via the @{setting PATH} from
-  the process environment: this is the case when Isabelle settings are active,
-  e.g.\ in the context of the main Isabelle tool wrapper
-  \secref{sec:isabelle-tool}. Alternatively, the full
-  \<^file>\<open>$ISABELLE_HOME/bin/isabelle_scala_script\<close> may be specified in expanded
-  form.
-\<close>
-
-
 subsection \<open>Scala compiler \label{sec:tool-scalac}\<close>
 
 text \<open>
@@ -152,7 +132,7 @@ text \<open>
 
   \<^medskip>
   The syntax of \<^path>\<open>etc/build.props\<close> follows a regular Java properties
-  file\<^footnote>\<open>\<^url>\<open>https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/Properties.html#load(java.io.Reader)\<close>\<close>,
+  file\<^footnote>\<open>\<^url>\<open>https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Properties.html#load(java.io.Reader)\<close>\<close>,
   but the encoding is \<^verbatim>\<open>UTF-8\<close>, instead of historic \<^verbatim>\<open>ISO 8859-1\<close> from the API
   documentation.
 

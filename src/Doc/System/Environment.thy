@@ -56,7 +56,7 @@ text \<open>
     \<^enum> The file \<^path>\<open>$ISABELLE_HOME_USER/etc/settings\<close> (if it
     exists) is run in the same way as the site default settings. Note that the
     variable @{setting ISABELLE_HOME_USER} has already been set before ---
-    usually to something like \<^verbatim>\<open>$USER_HOME/.isabelle/Isabelle2022\<close>.
+    usually to something like \<^verbatim>\<open>$USER_HOME/.isabelle/Isabelle2024\<close>.
 
     Thus individual users may override the site-wide defaults. Typically, a
     user settings file contains only a few lines, with some assignments that
@@ -135,7 +135,7 @@ text \<open>
   of the @{executable isabelle} executable.
 
   \<^descr>[@{setting_def ISABELLE_IDENTIFIER}\<open>\<^sup>*\<close>] refers to the name of this
-  Isabelle distribution, e.g.\ ``\<^verbatim>\<open>Isabelle2022\<close>''.
+  Isabelle distribution, e.g.\ ``\<^verbatim>\<open>Isabelle2024\<close>''.
 
   \<^descr>[@{setting_def ML_SYSTEM}, @{setting_def ML_HOME}, @{setting_def
   ML_OPTIONS}, @{setting_def ML_PLATFORM}, @{setting_def ML_IDENTIFIER}\<open>\<^sup>*\<close>]
@@ -174,7 +174,7 @@ text \<open>
   is \<^path>\<open>$ISABELLE_HOME/heaps\<close>. See also \secref{sec:tool-build}.
 
   \<^descr>[@{setting_def ISABELLE_LOGIC}] specifies the default logic to load if none
-  is given explicitely by the user. The default value is \<^verbatim>\<open>HOL\<close>.
+  is given explicitly by the user. The default value is \<^verbatim>\<open>HOL\<close>.
 
   \<^descr>[@{setting_def ISABELLE_LINE_EDITOR}] specifies the line editor for the
   @{tool_ref console} interface.
@@ -446,6 +446,75 @@ text \<open>
   The subsequent example creates a raw Java process on the command-line and
   invokes the main Isabelle application entry point:
   @{verbatim [display] \<open>isabelle_java -Djava.awt.headless=false isabelle.jedit.JEdit_Main\<close>}
+\<close>
+
+
+section \<open>System registry via TOML \label{sec:system-registry}\<close>
+
+text \<open>
+  Tools implemented in Isabelle/Scala may refer to a global registry of
+  hierarchically structured values, which is based on a collection of TOML
+  files. TOML is conceptually similar to JSON, but aims at human-readable
+  syntax.
+
+  The recursive structure of a TOML \<^emph>\<open>value\<close> is defined as follows:
+    \<^enum> atom: string, integer, float, bool, date (ISO-8601)
+    \<^enum> array: sequence of \<^emph>\<open>values\<close> \<open>t\<close>, written \<^verbatim>\<open>[\<close>\<open>t\<^sub>1\<close>\<^verbatim>\<open>,\<close>\<open>\<dots>\<close>\<^verbatim>\<open>,\<close>\<open>t\<^sub>n\<close>\<^verbatim>\<open>]\<close>
+    \<^enum> table: mapping from \<^emph>\<open>names\<close> \<open>a\<close> to \<^emph>\<open>values\<close> \<open>t\<close>, written
+      \<^verbatim>\<open>{\<close>\<open>a\<^sub>1\<close>\<^verbatim>\<open>=\<close>\<open>t\<^sub>1\<close>\<^verbatim>\<open>,\<close>\<open>\<dots>\<close>\<^verbatim>\<open>,\<close>\<open>a\<^sub>n\<close>\<^verbatim>\<open>=\<close>\<open>t\<^sub>n\<close>\<^verbatim>\<open>}\<close>
+
+  There are various alternative syntax forms for convenience, e.g. to
+  construct a table of tables, using \<^emph>\<open>header syntax\<close> that resembles
+  traditional \<^verbatim>\<open>.INI\<close>-file notation. For example:
+  @{verbatim [display, indent = 2]
+  \<open>[point.A]
+x = 1
+y = 1
+description = "one point"
+
+[point.B]
+x = 2
+y = -2
+description = "another point"
+
+[point.C]
+x = 3
+y = 7
+description = "yet another point"
+\<close>}
+
+  Or alternatively like this:
+  @{verbatim [display, indent = 2]
+  \<open>point.A.x = 1
+point.A.y = 1
+point.A.description = "one point"
+
+point.B.x = 2
+point.B.y = -2
+point.B.description = "another point"
+
+point.C.x = 3
+point.C.y = 7
+point.C.description = "yet another point"
+\<close>}
+
+  The TOML website\<^footnote>\<open>\<^url>\<open>https://toml.io/en/v1.0.0\<close>\<close> provides many examples,
+  together with the full language specification. Note that the Isabelle/Scala
+  implementation of TOML uses the default ISO date/time format of
+  Java.\<^footnote>\<open>\<^url>\<open>https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/time/format/DateTimeFormatter.html\<close>\<close>
+
+  \<^medskip>
+  The overall system registry is collected from \<^verbatim>\<open>registry.toml\<close> files in
+  directories specified via the settings variable @{setting
+  "ISABELLE_REGISTRY"}: this refers to \<^path>\<open>$ISABELLE_HOME\<close> and
+  \<^path>\<open>$ISABELLE_HOME_USER\<close> by default, but further directories may be
+  specified via the GNU bash function \<^bash_function>\<open>isabelle_registry\<close>
+  within \<^path>\<open>etc/settings\<close> of Isabelle components.
+
+  The result is available as Isabelle/Scala object
+  \<^scala>\<open>isabelle.Registry.global\<close>. That is empty by default, unless users
+  populate \<^path>\<open>$ISABELLE_HOME_USER/etc/registry.toml\<close> or provide other
+  component \<^path>\<open>etc/registry.toml\<close> files.
 \<close>
 
 

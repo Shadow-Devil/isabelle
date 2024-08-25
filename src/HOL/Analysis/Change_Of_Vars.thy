@@ -749,7 +749,7 @@ proof -
             fix x
             assume "e > 0"  "m < n"  "n * e \<le> \<bar>det (matrix (f' x))\<bar>"  "\<bar>det (matrix (f' x))\<bar> < (1 + real m) * e"
             then have "n < 1 + real m"
-              by (metis (no_types, opaque_lifting) less_le_trans mult.commute not_le mult_le_cancel_iff2)
+              by (metis (no_types, opaque_lifting) less_le_trans mult.commute not_le mult_le_cancel_left_pos)
             then show "False"
               using less.hyps by linarith
           qed
@@ -891,10 +891,9 @@ proof -
   let ?\<mu> = "measure lebesgue"
   have "x \<in> cbox (vec (- real (nat \<lceil>norm x\<rceil>))) (vec (real (nat \<lceil>norm x\<rceil>)))" for x :: "real^'n::_"
     apply (simp add: mem_box_cart)
-    by (smt (verit, best) Finite_Cartesian_Product.norm_nth_le nat_ceiling_le_eq 
-        real_nat_ceiling_ge real_norm_def)
+    by (smt (verit, best) component_le_norm_cart le_of_int_ceiling)
   then have Seq: "S = (\<Union>n. ?I n)"
-    by auto
+    by blast
   have fIn: "f ` ?I n \<in> lmeasurable"
        and mfIn: "?\<mu> (f ` ?I n) \<le> integral S (\<lambda>x. \<bar>det (matrix (f' x))\<bar>)" (is ?MN) for n
   proof -

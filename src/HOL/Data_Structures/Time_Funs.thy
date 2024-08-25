@@ -4,8 +4,15 @@
 *)
 section \<open>Time functions for various standard library operations\<close>
 theory Time_Funs
-  imports Main
+  imports Define_Time_Function
 begin
+
+time_fun "(@)"
+
+lemma T_append: "T_append xs ys = length xs + 1"
+by(induction xs) auto
+
+text \<open>Automatic definition of \<open>T_length\<close> is cumbersome because of the type class for \<open>size\<close>.\<close>
 
 fun T_length :: "'a list \<Rightarrow> nat" where
   "T_length [] = 1"
@@ -36,30 +43,20 @@ lemma T_filter_eq: "T_filter T_p xs = (\<Sum>x\<leftarrow>xs. T_p x) + length xs
 
 lemmas [simp del] = T_filter.simps
 
+time_fun nth
 
-fun T_nth :: "'a list \<Rightarrow> nat \<Rightarrow> nat" where
-  "T_nth [] n = 1"
-| "T_nth (x # xs) n = (case n of 0 \<Rightarrow> 1 | Suc n' \<Rightarrow> T_nth xs n' + 1)"
-
-lemma T_nth_eq: "T_nth xs n = min n (length xs) + 1"
+lemma T_nth_eq: "n < length xs \<Longrightarrow> T_nth xs n = n + 1"
   by (induction xs n rule: T_nth.induct) (auto split: nat.splits)
 
 lemmas [simp del] = T_nth.simps
 
-
-fun T_take :: "nat \<Rightarrow> 'a list \<Rightarrow> nat" where
-  "T_take n [] = 1"
-| "T_take n (x # xs) = (case n of 0 \<Rightarrow> 1 | Suc n' \<Rightarrow> T_take n' xs + 1)"
+time_fun take
+time_fun drop
 
 lemma T_take_eq: "T_take n xs = min n (length xs) + 1"
   by (induction xs arbitrary: n) (auto split: nat.splits)
 
-fun T_drop :: "nat \<Rightarrow> 'a list \<Rightarrow> nat" where
-  "T_drop n [] = 1"
-| "T_drop n (x # xs) = (case n of 0 \<Rightarrow> 1 | Suc n' \<Rightarrow> T_drop n' xs + 1)"
-
 lemma T_drop_eq: "T_drop n xs = min n (length xs) + 1"
   by (induction xs arbitrary: n) (auto split: nat.splits)
-  
   
 end

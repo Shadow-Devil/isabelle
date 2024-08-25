@@ -73,11 +73,11 @@ fun alternative f (SOME x) (SOME y) = SOME (f (x, y))
   | alternative _ NONE (y as SOME _) = y
   | alternative _ NONE NONE = NONE
 
-fun varify_nonfixed_terms_global nonfixeds tm = tm
-  |> Same.commit (Term_Subst.map_aterms_same
+fun varify_nonfixed_terms_global nonfixeds tm =
+  tm |> Term.map_aterms
     (fn Free (x, T) => if member (op =) nonfixeds x then Var ((x, 0), T) else raise Same.SAME
       | Var (xi, _) => raise TERM (Logic.bad_schematic xi, [tm])
-      | _ => raise Same.SAME))
+      | _ => raise Same.SAME)
 
 fun max_outcome outcomes =
   let
@@ -262,7 +262,7 @@ fun analyze_prover_result_for_inconsistency (result as {outcome, used_facts, ...
           | facts => "The goal is falsified by these facts: " ^ commas facts)
         else
           "Derived \"False\" from these facts alone: " ^
-          commas (map fst used_facts)))
+          space_implode " " (map fst used_facts)))
 
 fun check_expected_outcome ctxt prover_name expect outcome =
   let
@@ -328,12 +328,9 @@ fun launch_prover_and_preplay (params as {debug, timeout, expect, ...}) mode
       if debug then
         really_go ()
       else
-        (really_go ()
-         handle
-           ERROR msg => (SH_Unknown, fn () => msg ^ "\n")
-         | exn =>
-           if Exn.is_interrupt exn then Exn.reraise exn
-           else (SH_Unknown, fn () => Runtime.exn_message exn ^ "\n"))
+        \<^try>\<open>really_go ()
+          catch ERROR msg => (SH_Unknown, fn () => msg ^ "\n")
+            | exn => (SH_Unknown, fn () => Runtime.exn_message exn ^ "\n")\<close>
 
     val (outcome, message) = Timeout.apply hard_timeout go ()
     val () = check_expected_outcome ctxt prover_name expect outcome
@@ -464,7 +461,7 @@ fun prover_slices_of_schedule ctxt goal subgoal factss
   end
 
 fun run_sledgehammer (params as {verbose, spy, provers, falsify, induction_rules, max_facts,
-    max_proofs, slices, ...}) mode writeln_result i (fact_override as {only, ...}) state =
+    max_proofs, slices, timeout, ...}) mode writeln_result i (fact_override as {only, ...}) state =
   if null provers then
     error "No prover is set"
   else
@@ -513,7 +510,7 @@ fun run_sledgehammer (params as {verbose, spy, provers, falsify, induction_rules
         fun massage_message proof_or_inconsistency s =
           let val s' = strip_time s in
             if member (op =) (Synchronized.value seen_messages) s' then
-              "Found duplicate " ^ proof_or_inconsistency
+              "Duplicate " ^ proof_or_inconsistency
             else
               (Synchronized.change seen_messages (cons s'); s)
           end
@@ -577,6 +574,8 @@ fun run_sledgehammer (params as {verbose, spy, provers, falsify, induction_rules
             val launch = launch_prover_and_preplay params mode has_already_found_something
               found_something massage_message writeln_result learn
 
+            val timer = Timer.startRealTimer ()
+
             val schedule =
               if mode = Auto_Try then provers
               else schedule_of_provers provers slices
@@ -597,7 +596,8 @@ fun run_sledgehammer (params as {verbose, spy, provers, falsify, induction_rules
             else
               (learn chained_thms;
                Par_List.map (fn (prover, slice) =>
-                   if Synchronized.value found_proofs_and_falsifications < max_proofs then
+                   if Synchronized.value found_proofs_and_falsifications < max_proofs
+                      andalso Timer.checkRealTimer timer < timeout then
                      launch problem slice prover
                    else
                      (SH_None, ""))

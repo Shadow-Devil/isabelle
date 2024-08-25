@@ -7,13 +7,14 @@ File-system operations.
 package isabelle
 
 
+import java.util.{Properties => JProperties}
 import java.io.{BufferedWriter, OutputStreamWriter, FileOutputStream, BufferedOutputStream,
   OutputStream, InputStream, FileInputStream, BufferedInputStream, BufferedReader,
   InputStreamReader, File => JFile, IOException}
 import java.nio.file.{StandardOpenOption, Path => JPath, Files, SimpleFileVisitor,
   FileVisitOption, FileVisitResult}
 import java.nio.file.attribute.{BasicFileAttributes, PosixFilePermission}
-import java.net.{URI, URL, MalformedURLException}
+import java.net.URI
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 import java.util.EnumSet
 
@@ -35,12 +36,13 @@ object File {
 
   def standard_url(name: String): String =
     try {
-      val url = new URL(name)
-      if (url.getProtocol == "file" && Url.is_wellformed_file(name))
+      val url = new URI(name).toURL
+      if (url.getProtocol == "file" && Url.is_wellformed_file(name)) {
         standard_path(Url.parse_file(name))
+      }
       else name
     }
-    catch { case _: MalformedURLException => standard_path(name) }
+    catch { case exn: Throwable if Url.is_malformed(exn) => standard_path(name) }
 
 
   /* platform path (Windows or Posix) */
@@ -84,8 +86,8 @@ object File {
   def uri(file: JFile): URI = file.toURI
   def uri(path: Path): URI = path.file.toURI
 
-  def url(file: JFile): URL = uri(file).toURL
-  def url(path: Path): URL = url(path.file)
+  def url(file: JFile): Url = Url(uri(file))
+  def url(path: Path): Url = url(path.file)
 
 
   /* adhoc file types */
@@ -129,15 +131,6 @@ object File {
   def bash_path(file: JFile): String = Bash.string(standard_path(file))
 
   def bash_platform_path(path: Path): String = Bash.string(platform_path(path))
-
-
-  /* directory entries */
-
-  def check_dir(path: Path): Path =
-    if (path.is_dir) path else error("No such directory: " + path)
-
-  def check_file(path: Path): Path =
-    if (path.is_file) path else error("No such file: " + path)
 
 
   /* directory content */
@@ -258,6 +251,15 @@ object File {
     }
     reader.close()
     result.toList
+  }
+
+
+  /* read properties */
+
+  def read_props(path: Path): JProperties = {
+    val props = new JProperties
+    props.load(Files.newBufferedReader(path.java_path))
+    props
   }
 
 
@@ -417,8 +419,8 @@ object File {
   }
 
 
-  /* space */
+  /* strict file size */
 
-  def space(path: Path): Space =
-    Space.bytes(check_file(path).file.length)
+  def size(path: Path): Long = path.check_file.file.length
+  def space(path: Path): Space = Space.bytes(size(path))
 }

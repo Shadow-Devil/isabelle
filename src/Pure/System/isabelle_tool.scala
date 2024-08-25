@@ -87,6 +87,8 @@ object Isabelle_Tool {
 
   /* command line entry point */
 
+  def exe(isabelle_home: Path): Path = isabelle_home + Path.explode("bin/isabelle")
+
   def main(args: Array[String]): Unit = {
     Command_Line.tool {
       args.toList match {
@@ -124,6 +126,8 @@ class Tools extends Isabelle_Scala_Tools(
   Build.isabelle_tool2,
   Build.isabelle_tool3,
   Build.isabelle_tool4,
+  Build_Benchmark.isabelle_tool,
+  Build_Schedule.isabelle_tool,
   CI_Build.isabelle_tool,
   Doc.isabelle_tool,
   Docker_Build.isabelle_tool,
@@ -131,6 +135,7 @@ class Tools extends Isabelle_Scala_Tools(
   Dotnet_Setup.isabelle_tool,
   Dump.isabelle_tool,
   Export.isabelle_tool,
+  Go_Setup.isabelle_tool,
   Logo.isabelle_tool,
   ML_Process.isabelle_tool,
   Mercurial.isabelle_tool1,
@@ -162,6 +167,7 @@ class Admin_Tools extends Isabelle_Scala_Tools(
   Build_Log.isabelle_tool,
   Build_Status.isabelle_tool,
   Check_Sources.isabelle_tool,
+  Component_Bash_Process.isabelle_tool,
   Component_CSDP.isabelle_tool,
   Component_CVC5.isabelle_tool,
   Component_Cygwin.isabelle_tool,
@@ -170,12 +176,15 @@ class Admin_Tools extends Isabelle_Scala_Tools(
   Component_Easychair.isabelle_tool,
   Component_Foiltex.isabelle_tool,
   Component_Fonts.isabelle_tool,
+  Component_Hugo.isabelle_tool,
+  Component_Javamail.isabelle_tool,
   Component_JDK.isabelle_tool,
   Component_JEdit.isabelle_tool,
   Component_Jsoup.isabelle_tool,
   Component_LIPIcs.isabelle_tool,
   Component_LLNCS.isabelle_tool,
   Component_Minisat.isabelle_tool,
+  Component_MLton.isabelle_tool,
   Component_PDFjs.isabelle_tool,
   Component_PolyML.isabelle_tool1,
   Component_PolyML.isabelle_tool2,
@@ -188,6 +197,7 @@ class Admin_Tools extends Isabelle_Scala_Tools(
   Component_Stack.isabelle_tool,
   Component_Vampire.isabelle_tool,
   Component_VeriT.isabelle_tool,
+  Component_Windows_App.isabelle_tool,
   Component_Zipperposition.isabelle_tool,
   Component_Zstd.isabelle_tool,
   Components.isabelle_tool,

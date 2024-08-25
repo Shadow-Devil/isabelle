@@ -35,20 +35,23 @@ fun apply' {physical, timeout} f x =
   else
     Thread_Attributes.with_attributes Thread_Attributes.no_interrupts (fn orig_atts =>
       let
-        val self = Thread.self ();
+        val self = Isabelle_Thread.self ();
         val start = Time.now ();
 
         val request =
           Event_Timer.request {physical = physical} (start + scale_time timeout)
-            (fn () => Isabelle_Thread.interrupt_unsynchronized self);
+            (fn () => Isabelle_Thread.interrupt_thread self);
         val result =
-          Exn.capture (fn () => Thread_Attributes.with_attributes orig_atts (fn _ => f x)) ();
+          Exn.capture_body (fn () => Thread_Attributes.with_attributes orig_atts (fn _ => f x));
 
         val stop = Time.now ();
         val was_timeout = not (Event_Timer.cancel request);
-        val test = Exn.capture Thread_Attributes.expose_interrupt ();
+        val test = Isabelle_Thread.expose_interrupt_result ();
+        val was_interrupt =
+          Exn.is_interrupt_proper_exn result orelse
+          Exn.is_interrupt_proper_exn test;
       in
-        if was_timeout andalso (Exn.is_interrupt_exn result orelse Exn.is_interrupt_exn test)
+        if was_timeout andalso was_interrupt
         then raise TIMEOUT (stop - start)
         else (Exn.release test; Exn.release result)
       end);

@@ -107,6 +107,7 @@ sig
   val weaken_sorts: sort list -> cterm -> cterm
   val proof_bodies_of: thm list -> proof_body list
   val proof_body_of: thm -> proof_body
+  val zproof_of: thm -> zproof
   val proof_of: thm -> proof
   val reconstruct_proof_of: thm -> Proofterm.proof
   val consolidate: thm list -> unit
@@ -133,8 +134,8 @@ sig
   (*type classes*)
   val the_classrel: theory -> class * class -> thm
   val the_arity: theory -> string * sort list * class -> thm
-  val classrel_proof: theory -> class * class -> proof
-  val arity_proof: theory -> string * sort list * class -> proof
+  val sorts_zproof: theory -> ZTerm.sorts_proof
+  val sorts_proof: theory -> Proofterm.sorts_proof
   (*oracles*)
   val add_oracle: binding * ('a -> cterm) -> theory -> (string * ('a -> thm)) * theory
   val oracle_space: theory -> Name_Space.T
@@ -169,10 +170,14 @@ sig
   val trivial: cterm -> thm
   val of_class: ctyp * class -> thm
   val unconstrainT: thm -> thm
-  val varifyT_global': TFrees.set -> thm -> ((string * sort) * indexname) list * thm
+  val varifyT_global': TFrees.set -> thm -> ((string * sort) * (indexname * sort)) list * thm
   val varifyT_global: thm -> thm
   val legacy_freezeT: thm -> thm
   val plain_prop_of: thm -> term
+  val get_zproof_serials: theory -> serial list
+  val get_zproof: theory -> serial ->
+    {name: Thm_Name.T * Position.T, thm: thm, zboxes: ZTerm.zboxes, zproof: zproof} option
+  val store_zproof: Thm_Name.T * Position.T -> thm -> theory -> thm * theory
   val dest_state: thm * int -> (term * term) list * term list * term * term
   val lift_rule: cterm -> thm -> thm
   val incr_indexes: int -> thm -> thm
@@ -264,7 +269,8 @@ fun maxidx_of_cterm (Cterm {maxidx, ...}) = maxidx;
 
 fun global_cterm_of thy tm =
   let
-    val (t, T, maxidx) = Sign.certify_term thy tm;
+    val (t, T) = Sign.certify_term thy tm;
+    val maxidx = Term.maxidx_of_term t;
     val sorts = Sorts.insert_term t [];
   in Cterm {cert = Context.Certificate thy, t = t, T = T, maxidx = maxidx, sorts = sorts} end;
 
@@ -380,7 +386,7 @@ fun adjust_maxidx_cterm i (ct as Cterm {cert, t, T, maxidx, sorts}) =
 fun incr_indexes_cterm i (ct as Cterm {cert, t, T, maxidx, sorts}) =
   if i < 0 then raise CTERM ("negative increment", [ct])
   else if i = 0 then ct
-  else Cterm {cert = cert, t = Logic.incr_indexes ([], [], i) t,
+  else Cterm {cert = cert, t = Logic.incr_indexes ([], i) t,
     T = Logic.incr_tvar i T, maxidx = maxidx + i, sorts = sorts};
 
 
@@ -405,24 +411,25 @@ in
 
 val union_constraints = Ord_List.union constraint_ord;
 
-fun insert_constraints thy (T, S) =
-  let
-    val ignored =
-      S = [] orelse
-        (case T of
-          TFree (_, S') => S = S'
-        | TVar (_, S') => S = S'
-        | _ => false);
-  in
-    if ignored then I
-    else Ord_List.insert constraint_ord {theory = thy, typ = smash_atyps T, sort = S}
-  end;
+fun insert_constraints _ (_, []) = I
+  | insert_constraints thy (T, S) =
+      let
+        val ignored =
+          (case T of
+            TFree (_, S') => S = S'
+          | TVar (_, S') => S = S'
+          | _ => false);
+      in
+        if ignored then I
+        else Ord_List.insert constraint_ord {theory = thy, typ = smash_atyps T, sort = S}
+      end;
 
 fun insert_constraints_env thy env =
   let
     val tyenv = Envir.type_env env;
+    val normT = Envir.norm_type tyenv;
     fun insert ([], _) = I
-      | insert (S, T) = insert_constraints thy (Envir.norm_type tyenv T, S);
+      | insert (S, T) = insert_constraints thy (normT T, S);
   in tyenv |> Vartab.fold (insert o #2) end;
 
 end;
@@ -744,42 +751,47 @@ fun weaken_sorts raw_sorts ct =
 
 (** derivations and promised proofs **)
 
-fun make_deriv promises oracles thms proof =
-  Deriv {promises = promises, body = PBody {oracles = oracles, thms = thms, proof = proof}};
+fun make_deriv0 promises body = Deriv {promises = promises, body = body};
 
-val empty_deriv = make_deriv [] [] [] MinProof;
+fun make_deriv promises oracles thms zboxes zproof proof =
+  make_deriv0 promises
+    (PBody {oracles = oracles, thms = thms, zboxes = zboxes, zproof = zproof, proof = proof});
+
+val empty_deriv = make_deriv [] [] [] [] ZDummy MinProof;
 
 
 (* inference rules *)
 
 val promise_ord: (serial * thm future) ord = fn ((i, _), (j, _)) => int_ord (j, i);
 
-fun bad_proofs i =
-  error ("Illegal level of detail for proof objects: " ^ string_of_int i);
-
-fun deriv_rule2 f
-    (Deriv {promises = ps1, body = PBody {oracles = oracles1, thms = thms1, proof = prf1}})
-    (Deriv {promises = ps2, body = PBody {oracles = oracles2, thms = thms2, proof = prf2}}) =
+fun deriv_rule2 zproof proof
+    (Deriv {promises = ps1, body = PBody body1})
+    (Deriv {promises = ps2, body = PBody body2}) =
   let
-    val ps = Ord_List.union promise_ord ps1 ps2;
-    val oracles = Proofterm.union_oracles oracles1 oracles2;
-    val thms = Proofterm.union_thms thms1 thms2;
-    val prf =
-      (case ! Proofterm.proofs of
-        2 => f prf1 prf2
-      | 1 => MinProof
-      | 0 => MinProof
-      | i => bad_proofs i);
-  in make_deriv ps oracles thms prf end;
+    val ps' = Ord_List.union promise_ord ps1 ps2;
 
-fun deriv_rule1 f = deriv_rule2 (K f) empty_deriv;
+    val {oracles = oracles1, thms = thms1, zboxes = zboxes1, zproof = zprf1, proof = prf1} = body1;
+    val {oracles = oracles2, thms = thms2, zboxes = zboxes2, zproof = zprf2, proof = prf2} = body2;
 
-fun deriv_rule0 make_prf =
-  if ! Proofterm.proofs <= 1 then empty_deriv
-  else deriv_rule1 I (make_deriv [] [] [] (make_prf ()));
+    val oracles' = Proofterm.union_oracles oracles1 oracles2;
+    val thms' = Proofterm.union_thms thms1 thms2;
+    val zboxes' = ZTerm.union_zboxes zboxes1 zboxes2;
 
-fun deriv_rule_unconditional f (Deriv {promises, body = PBody {oracles, thms, proof}}) =
-  make_deriv promises oracles thms (f proof);
+    val proofs = Proofterm.get_proofs_level ();
+    val zproof' = if Proofterm.zproof_enabled proofs then zproof zprf1 zprf2 else ZDummy;
+    val proof' = if Proofterm.proof_enabled proofs then proof prf1 prf2 else MinProof;
+  in make_deriv ps' oracles' thms' zboxes' zproof' proof' end;
+
+fun deriv_rule1 zproof proof = deriv_rule2 (K zproof) (K proof) empty_deriv;
+
+fun deriv_rule0 zproof proof =
+  let val proofs = Proofterm.get_proofs_level () in
+    if Proofterm.proof_enabled proofs orelse Proofterm.zproof_enabled proofs then
+      deriv_rule1 I I (make_deriv [] [] [] []
+       (if Proofterm.zproof_enabled proofs then zproof () else ZDummy)
+       (if Proofterm.proof_enabled proofs then proof () else MinProof))
+    else empty_deriv
+  end;
 
 
 (* fulfilled proofs *)
@@ -796,6 +808,8 @@ fun fulfill_body (th as Thm (Deriv {promises, body}, _)) =
 
 fun proof_bodies_of thms = (join_promises_of thms; map fulfill_body thms);
 val proof_body_of = singleton proof_bodies_of;
+
+val zproof_of = Proofterm.zproof_of o proof_body_of;
 val proof_of = Proofterm.proof_of o proof_body_of;
 
 fun reconstruct_proof_of thm =
@@ -833,13 +847,13 @@ fun future future_thm ct =
     val Cterm {cert = cert, t = prop, T, maxidx, sorts} = ct;
     val _ = T <> propT andalso raise CTERM ("future: prop expected", [ct]);
     val _ =
-      if Proofterm.proofs_enabled ()
+      if Proofterm.any_proofs_enabled ()
       then raise CTERM ("future: proof terms enabled", [ct]) else ();
 
     val i = serial ();
     val future = future_thm |> Future.map (future_result i cert sorts prop);
   in
-    Thm (make_deriv [(i, future)] [] [] MinProof,
+    Thm (make_deriv [(i, future)] [] [] [] ZDummy MinProof,
      {cert = cert,
       tags = [],
       maxidx = maxidx,
@@ -858,12 +872,13 @@ fun axiom thy name =
   (case Name_Space.lookup (Theory.axiom_table thy) name of
     SOME prop =>
       let
-        val der = deriv_rule0 (fn () => Proofterm.axm_proof name prop);
+        fun zproof () = ZTerm.axiom_proof thy name prop;
+        fun proof () = Proofterm.axiom_proof name prop;
         val cert = Context.Certificate thy;
         val maxidx = maxidx_of_term prop;
         val shyps = Sorts.insert_term prop [];
       in
-        Thm (der,
+        Thm (deriv_rule0 zproof proof,
           {cert = cert, tags = [], maxidx = maxidx,
             constraints = [], shyps = shyps, hyps = [], tpairs = [], prop = prop})
       end
@@ -885,7 +900,7 @@ fun map_tags f (Thm (der, {cert, tags, maxidx, constraints, shyps, hyps, tpairs,
 (* technical adjustments *)
 
 fun norm_proof (th as Thm (der, args)) =
-  Thm (deriv_rule1 (Proofterm.rew_proof (theory_of_thm th)) der, args);
+  Thm (deriv_rule1 I (Proofterm.rew_proof (theory_of_thm th)) der, args);
 
 fun adjust_maxidx_thm i
     (th as Thm (der, {cert, tags, maxidx, constraints, shyps, hyps, tpairs, prop})) =
@@ -936,25 +951,37 @@ fun merge_classes
 structure Data = Theory_Data
 (
   type T =
+    {name: Thm_Name.T * Position.T, thm: thm} Inttab.table *  (*stored zproof thms*)
     unit Name_Space.table *  (*oracles: authentic derivation names*)
     classes;  (*type classes within the logic*)
 
-  val empty : T = (Name_Space.empty_table Markup.oracleN, empty_classes);
-  fun merge ((oracles1, sorts1), (oracles2, sorts2)) : T =
-    (Name_Space.merge_tables (oracles1, oracles2), merge_classes (sorts1, sorts2));
+  val empty : T = (Inttab.empty, Name_Space.empty_table Markup.oracleN, empty_classes);
+  fun merge ((_, oracles1, sorts1), (_, oracles2, sorts2)) : T =
+   (Inttab.empty,
+    Name_Space.merge_tables (oracles1, oracles2),
+    merge_classes (sorts1, sorts2));
 );
 
-val get_oracles = #1 o Data.get;
-val map_oracles = Data.map o apfst;
+val get_zproofs = #1 o Data.get;
+fun map_zproofs f = Data.map (fn (a, b, c) => (f a, b, c));
 
-val get_classes = (fn (_, Classes args) => args) o Data.get;
+val get_oracles = #2 o Data.get;
+fun map_oracles f = Data.map (fn (a, b, c) => (a, f b, c));
+
+val get_classes = (fn (_, _, Classes args) => args) o Data.get;
 val get_classrels = #classrels o get_classes;
 val get_arities = #arities o get_classes;
 
 fun map_classes f =
-  (Data.map o apsnd) (fn Classes {classrels, arities} => make_classes (f (classrels, arities)));
+  Data.map (fn (a, b, Classes {classrels, arities}) =>
+    (a, b, make_classes (f (classrels, arities))));
 fun map_classrels f = map_classes (fn (classrels, arities) => (f classrels, arities));
 fun map_arities f = map_classes (fn (classrels, arities) => (classrels, f arities));
+
+val _ =
+  (Theory.setup o Theory.at_begin) (fn thy =>
+    if Inttab.is_empty (get_zproofs thy) then NONE
+    else SOME (map_zproofs (K Inttab.empty) thy));
 
 
 (* type classes *)
@@ -971,8 +998,8 @@ fun the_arity thy (a, Ss, c) =
   | NONE => error ("Unproven type arity " ^
       Syntax.string_of_arity (Proof_Context.init_global thy) (a, Ss, [c])));
 
-val classrel_proof = proof_of oo the_classrel;
-val arity_proof = proof_of oo the_arity;
+fun sorts_zproof thy = (zproof_of o the_classrel thy, zproof_of o the_arity thy);
+fun sorts_proof thy = (proof_of o the_classrel thy, proof_of o the_arity thy);
 
 
 (* solve sort constraints by pro-forma proof *)
@@ -982,8 +1009,7 @@ local
 fun union_digest (oracles1, thms1) (oracles2, thms2) =
   (Proofterm.union_oracles oracles1 oracles2, Proofterm.union_thms thms1 thms2);
 
-fun thm_digest (Thm (Deriv {body = PBody {oracles, thms, ...}, ...}, _)) =
-  (oracles, thms);
+fun thm_digest (Thm (Deriv {body = PBody {oracles, thms, ...}, ...}, _)) = (oracles, thms);
 
 fun constraint_digest ({theory = thy, typ, sort, ...}: constraint) =
   Sorts.of_sort_derivation (Sign.classes_of thy)
@@ -995,33 +1021,32 @@ fun constraint_digest ({theory = thy, typ, sort, ...}: constraint) =
     type_variable = fn T => map (pair ([], [])) (Type.sort_of_atyp T)}
    (typ, sort);
 
+fun bad_constraint_theory cert ({theory = thy, ...}: constraint) =
+  if Context.eq_thy_id (Context.certificate_theory_id cert, Context.theory_id thy)
+  then NONE else SOME thy;
+
 in
 
-fun solve_constraints (thm as Thm (_, {constraints = [], ...})) = thm
-  | solve_constraints (thm as Thm (der, args)) =
-      let
-        val {cert, tags, maxidx, constraints, shyps, hyps, tpairs, prop} = args;
+fun solve_constraints (thm as Thm (der, args)) =
+  let
+    val {cert, tags, maxidx, constraints, shyps, hyps, tpairs, prop} = args;
 
-        val thy = Context.certificate_theory cert
-          handle ERROR msg => raise CONTEXT (msg, [], [], [thm], NONE);
-        val bad_thys =
-          constraints |> map_filter (fn {theory = thy', ...} =>
-            if Context.eq_thy (thy, thy') then NONE else SOME thy');
-        val () =
-          if null bad_thys then ()
-          else
-            raise THEORY ("solve_constraints: bad theories for theorem\n" ^
-              Syntax.string_of_term_global thy (prop_of thm), thy :: bad_thys);
+    val bad_thys = map_filter (bad_constraint_theory cert) constraints;
+    val _ =
+      if null bad_thys then ()
+      else
+        raise THEORY ("solve_constraints: bad theories for theorem\n" ^
+          Syntax.string_of_term_global (hd bad_thys) (prop_of thm), bad_thys);
 
-        val Deriv {promises, body = PBody {oracles, thms, proof}} = der;
-        val (oracles', thms') = (oracles, thms)
-          |> fold (fold union_digest o constraint_digest) constraints;
-        val body' = PBody {oracles = oracles', thms = thms', proof = proof};
-      in
-        Thm (Deriv {promises = promises, body = body'},
-          {constraints = [], cert = cert, tags = tags, maxidx = maxidx,
-            shyps = shyps, hyps = hyps, tpairs = tpairs, prop = prop})
-      end;
+    val Deriv {promises, body = PBody {oracles, thms, zboxes, zproof, proof}} = der;
+    val (oracles', thms') = (oracles, thms)
+      |> fold (fold union_digest o constraint_digest) constraints;
+    val zproof' = ZTerm.beta_norm_prooft zproof;
+  in
+    Thm (make_deriv promises oracles' thms' zboxes zproof' proof,
+      {constraints = [], cert = cert, tags = tags, maxidx = maxidx,
+        shyps = shyps, hyps = hyps, tpairs = tpairs, prop = prop})
+  end;
 
 end;
 
@@ -1035,35 +1060,53 @@ fun strip_shyps thm =
     Thm (_, {shyps = [], ...}) => thm
   | Thm (der, {cert, tags, maxidx, constraints, shyps, hyps, tpairs, prop}) =>
       let
-        val thy = theory_of_thm thm;
+        val Deriv {promises, body = PBody {oracles, thms, zboxes, zproof, proof}} = der;
 
+        val thy = theory_of_thm thm;
         val algebra = Sign.classes_of thy;
-        val minimize = Sorts.minimize_sort algebra;
         val le = Sorts.sort_le algebra;
         fun lt (S1, S2) = le (S1, S2) andalso not (le (S2, S1));
         fun rel (S1, S2) = if S1 = S2 then [] else [(Term.aT S1, S2)];
 
-        val present =
-          (fold_terms {hyps = true} o fold_types o fold_atyps_sorts) (insert (eq_fst op =)) thm [];
-        val extra = fold (Sorts.remove_sort o #2) present shyps;
-        val witnessed = Sign.witness_sorts thy present extra;
-        val non_witnessed = fold (Sorts.remove_sort o #2) witnessed extra |> map (`minimize);
+        val present_set = Types.build (thm |> fold_terms {hyps = true} Types.add_atyps);
+        val {present, extra} = Logic.present_sorts shyps present_set;
+
+        val (witnessed, non_witnessed) =
+          Sign.witness_sorts thy present extra ||> map (`(Sorts.minimize_sort algebra));
 
         val extra' =
           non_witnessed |> map_filter (fn (S, _) =>
             if non_witnessed |> exists (fn (S', _) => lt (S', S)) then NONE else SOME S)
           |> Sorts.make;
 
-        val constrs' =
+        val non_witnessed_constraints =
           non_witnessed |> maps (fn (S1, S2) =>
             let val S0 = the (find_first (fn S => le (S, S1)) extra')
             in rel (S0, S1) @ rel (S1, S2) end);
 
-        val constraints' = fold (insert_constraints thy) (witnessed @ constrs') constraints;
+        val constraints' = constraints
+          |> fold (insert_constraints thy) witnessed
+          |> fold (insert_constraints thy) non_witnessed_constraints;
+
         val shyps' = fold (Sorts.insert_sort o #2) present extra';
+
+        val types = present @ witnessed @ map (`Logic.dummy_tfree) extra';
+        fun get_type S = types |> get_first (fn (T', S') => if le (S', S) then SOME T' else NONE);
+        val map_atyp =
+          Same.function_eq (op =) (fn T =>
+            if Types.defined present_set T then raise Same.SAME
+            else
+              (case get_type (Type.sort_of_atyp T) of
+                SOME T' => T'
+              | NONE => raise Fail "strip_shyps: bad type variable in proof term"));
+        val map_ztyp =
+          ZTypes.unsynchronized_cache
+            (ZTerm.subst_type_same (ZTerm.ztyp_of o map_atyp o ZTerm.typ_of o ZTVar));
+
+        val zproof' = ZTerm.map_proof_types {hyps = true} map_ztyp zproof;
+        val proof' = Proofterm.map_proof_types (Term.map_atyps_same map_atyp) proof;
       in
-        Thm (deriv_rule_unconditional
-          (Proofterm.strip_shyps_proof algebra present witnessed extra') der,
+        Thm (make_deriv promises oracles thms zboxes zproof' proof',
          {cert = cert, tags = tags, maxidx = maxidx, constraints = constraints',
           shyps = shyps', hyps = hyps, tpairs = tpairs, prop = prop})
       end)
@@ -1117,11 +1160,8 @@ fun name_derivation name_pos =
       val _ = null tpairs orelse raise THM ("name_derivation: bad flex-flex constraints", 0, [thm]);
 
       val ps = map (apsnd (Future.map fulfill_body)) promises;
-      val (pthm, proof) =
-        Proofterm.thm_proof thy (classrel_proof thy) (arity_proof thy)
-          name_pos shyps hyps prop ps body;
-      val der' = make_deriv [] [] [pthm] proof;
-    in Thm (der', args) end);
+      val body' = Proofterm.thm_proof thy (sorts_proof thy) name_pos shyps hyps prop ps body;
+    in Thm (make_deriv0 [] body', args) end);
 
 fun close_derivation pos =
   solve_constraints #> (fn thm =>
@@ -1134,25 +1174,37 @@ val trim_context = solve_constraints #> trim_context_thm;
 
 (*** Oracles ***)
 
-fun add_oracle (b, oracle_fn) thy =
+fun add_oracle (b, oracle_fn) thy1 =
   let
-    val (name, oracles') = Name_Space.define (Context.Theory thy) true (b, ()) (get_oracles thy);
-    val thy' = map_oracles (K oracles') thy;
+    val (name, oracles') = Name_Space.define (Context.Theory thy1) true (b, ()) (get_oracles thy1);
+    val thy2 = map_oracles (K oracles') thy1;
+    val cert2 = Context.Certificate_Id (Context.theory_id thy2);
     fun invoke_oracle arg =
-      let val Cterm {cert = cert2, t = prop, T, maxidx, sorts} = oracle_fn arg in
+      let val ct as Cterm {cert = cert3, t = prop, T, maxidx, sorts} = oracle_fn arg in
         if T <> propT then
           raise THM ("Oracle's result must have type prop: " ^ name, 0, [])
         else
           let
-            val (oracle, prf) =
-              (case ! Proofterm.proofs of
-                2 => (((name, Position.thread_data ()), SOME prop), Proofterm.oracle_proof name prop)
-              | 1 => (((name, Position.thread_data ()), SOME prop), MinProof)
-              | 0 => (((name, Position.none), NONE), MinProof)
-              | i => bad_proofs i);
+            val cert = Context.join_certificate (cert2, cert3);
+            val proofs = Proofterm.get_proofs_level ();
+            val oracle =
+              if Proofterm.oracle_enabled proofs
+              then ((name, Position.thread_data ()), SOME prop)
+              else ((name, Position.none), NONE);
+            val proof =
+              if Proofterm.proof_enabled proofs
+              then Proofterm.oracle_proof name prop
+              else MinProof;
+            val zproof =
+              if Proofterm.zproof_enabled proofs then
+                let
+                  val thy = Context.certificate_theory cert handle ERROR msg =>
+                    raise CONTEXT (msg, [], [ct], [], NONE);
+                in ZTerm.oracle_proof thy name prop end
+              else ZDummy;
           in
-            Thm (make_deriv [] [oracle] [] prf,
-             {cert = Context.join_certificate (Context.Certificate thy', cert2),
+            Thm (make_deriv [] [oracle] [] [] zproof proof,
+             {cert = cert,
               tags = [],
               maxidx = maxidx,
               constraints = [],
@@ -1162,7 +1214,7 @@ fun add_oracle (b, oracle_fn) thy =
               prop = prop})
           end
       end;
-  in ((name, invoke_oracle), thy') end;
+  in ((name, invoke_oracle), thy2) end;
 
 val oracle_space = Name_Space.space_of_table o get_oracles;
 
@@ -1183,20 +1235,30 @@ fun check_oracle ctxt =
 
 (*The assumption rule A |- A*)
 fun assume raw_ct =
-  let val Cterm {cert, t = prop, T, maxidx, sorts} = adjust_maxidx_cterm ~1 raw_ct in
+  let val ct as Cterm {cert, t = prop, T, maxidx, sorts} = adjust_maxidx_cterm ~1 raw_ct in
     if T <> propT then
       raise THM ("assume: prop", 0, [])
     else if maxidx <> ~1 then
       raise THM ("assume: variables", maxidx, [])
-    else Thm (deriv_rule0 (fn () => Proofterm.Hyp prop),
-     {cert = cert,
-      tags = [],
-      maxidx = ~1,
-      constraints = [],
-      shyps = sorts,
-      hyps = [prop],
-      tpairs = [],
-      prop = prop})
+    else
+      let
+        fun zproof () =
+          let
+            val thy = Context.certificate_theory cert handle ERROR msg =>
+              raise CONTEXT (msg, [], [ct], [], NONE);
+          in ZTerm.assume_proof thy prop end;
+        fun proof () = Proofterm.Hyp prop;
+      in
+        Thm (deriv_rule0 zproof proof,
+         {cert = cert,
+          tags = [],
+          maxidx = ~1,
+          constraints = [],
+          shyps = sorts,
+          hyps = [prop],
+          tpairs = [],
+          prop = prop})
+      end
   end;
 
 (*Implication introduction
@@ -1212,15 +1274,25 @@ fun implies_intr
   if T <> propT then
     raise THM ("implies_intr: assumptions must have type prop", 0, [th])
   else
-    Thm (deriv_rule1 (Proofterm.implies_intr_proof A) der,
-     {cert = join_certificate1 (ct, th),
-      tags = [],
-      maxidx = Int.max (maxidx1, maxidx2),
-      constraints = constraints,
-      shyps = Sorts.union sorts shyps,
-      hyps = remove_hyps A hyps,
-      tpairs = tpairs,
-      prop = Logic.mk_implies (A, prop)});
+    let
+      val cert = join_certificate1 (ct, th);
+      fun zproof p =
+        let
+          val thy = Context.certificate_theory cert handle ERROR msg =>
+            raise CONTEXT (msg, [], [ct], [th], NONE);
+        in ZTerm.implies_intr_proof thy A p end
+      fun proof p = Proofterm.implies_intr_proof A p;
+    in
+      Thm (deriv_rule1 zproof proof der,
+       {cert = cert,
+        tags = [],
+        maxidx = Int.max (maxidx1, maxidx2),
+        constraints = constraints,
+        shyps = Sorts.union sorts shyps,
+        hyps = remove_hyps A hyps,
+        tpairs = tpairs,
+        prop = Logic.mk_implies (A, prop)})
+    end;
 
 
 (*Implication elimination
@@ -1239,7 +1311,7 @@ fun implies_elim thAB thA =
     (case prop of
       Const ("Pure.imp", _) $ A $ B =>
         if A aconv propA then
-          Thm (deriv_rule2 (curry Proofterm.%%) der derA,
+          Thm (deriv_rule2 (curry ZAppp) (curry Proofterm.%%) der derA,
            {cert = join_certificate2 (thAB, thA),
             tags = [],
             maxidx = Int.max (maxidx1, maxidx2),
@@ -1271,15 +1343,25 @@ fun forall_intr
       if occs x ts tpairs then
         raise THM ("forall_intr: variable " ^ quote a ^ " free in assumptions", 0, [th])
       else
-        Thm (deriv_rule1 (Proofterm.forall_intr_proof (a, x) NONE) der,
-         {cert = join_certificate1 (ct, th),
-          tags = [],
-          maxidx = Int.max (maxidx1, maxidx2),
-          constraints = constraints,
-          shyps = Sorts.union sorts shyps,
-          hyps = hyps,
-          tpairs = tpairs,
-          prop = Logic.all_const T $ Abs (a, T, abstract_over (x, prop))});
+        let
+          val cert = join_certificate1 (ct, th);
+          fun zproof p =
+            let
+              val thy = Context.certificate_theory cert handle ERROR msg =>
+                raise CONTEXT (msg, [], [ct], [th], NONE);
+            in ZTerm.forall_intr_proof thy T (a, x) p end;
+          fun proof p = Proofterm.forall_intr_proof (a, x) NONE p;
+        in
+          Thm (deriv_rule1 zproof proof der,
+           {cert = cert,
+            tags = [],
+            maxidx = Int.max (maxidx1, maxidx2),
+            constraints = constraints,
+            shyps = Sorts.union sorts shyps,
+            hyps = hyps,
+            tpairs = tpairs,
+            prop = Logic.all_const T $ Abs (a, T, abstract_over (x, prop))})
+        end;
   in
     (case x of
       Free (a, _) => check_result a hyps
@@ -1300,15 +1382,25 @@ fun forall_elim
       if T <> qary then
         raise THM ("forall_elim: type mismatch", 0, [th])
       else
-        Thm (deriv_rule1 (Proofterm.% o rpair (SOME t)) der,
-         {cert = join_certificate1 (ct, th),
-          tags = [],
-          maxidx = Int.max (maxidx1, maxidx2),
-          constraints = constraints,
-          shyps = Sorts.union sorts shyps,
-          hyps = hyps,
-          tpairs = tpairs,
-          prop = Term.betapply (A, t)})
+        let
+          val cert = join_certificate1 (ct, th);
+          fun zproof p =
+            let
+              val thy = Context.certificate_theory cert handle ERROR msg =>
+                raise CONTEXT (msg, [], [ct], [th], NONE);
+            in ZTerm.forall_elim_proof thy t p end;
+          fun proof p = p % SOME t;
+        in
+          Thm (deriv_rule1 zproof proof der,
+           {cert = cert,
+            tags = [],
+            maxidx = Int.max (maxidx1, maxidx2),
+            constraints = constraints,
+            shyps = Sorts.union sorts shyps,
+            hyps = hyps,
+            tpairs = tpairs,
+            prop = Term.betapply (A, t)})
+        end
   | _ => raise THM ("forall_elim: not quantified", 0, [th]));
 
 
@@ -1317,16 +1409,25 @@ fun forall_elim
 (*Reflexivity
   t \<equiv> t
 *)
-fun reflexive (Cterm {cert, t, T = _, maxidx, sorts}) =
-  Thm (deriv_rule0 (fn () => Proofterm.reflexive_proof),
-   {cert = cert,
-    tags = [],
-    maxidx = maxidx,
-    constraints = [],
-    shyps = sorts,
-    hyps = [],
-    tpairs = [],
-    prop = Logic.mk_equals (t, t)});
+fun reflexive (ct as Cterm {cert, t, T, maxidx, sorts}) =
+  let
+    fun zproof () =
+      let
+        val thy = Context.certificate_theory cert handle ERROR msg =>
+          raise CONTEXT (msg, [], [ct], [], NONE);
+      in ZTerm.reflexive_proof thy T t end;
+    fun proof () = Proofterm.reflexive_proof;
+  in
+    Thm (deriv_rule0 zproof proof,
+     {cert = cert,
+      tags = [],
+      maxidx = maxidx,
+      constraints = [],
+      shyps = sorts,
+      hyps = [],
+      tpairs = [],
+      prop = Logic.mk_equals (t, t)})
+  end;
 
 (*Symmetry
   t \<equiv> u
@@ -1335,16 +1436,24 @@ fun reflexive (Cterm {cert, t, T = _, maxidx, sorts}) =
 *)
 fun symmetric (th as Thm (der, {cert, maxidx, constraints, shyps, hyps, tpairs, prop, ...})) =
   (case prop of
-    (eq as Const ("Pure.eq", _)) $ t $ u =>
-      Thm (deriv_rule1 Proofterm.symmetric_proof der,
-       {cert = cert,
-        tags = [],
-        maxidx = maxidx,
-        constraints = constraints,
-        shyps = shyps,
-        hyps = hyps,
-        tpairs = tpairs,
-        prop = eq $ u $ t})
+    (eq as Const ("Pure.eq", Type ("fun", [T, _]))) $ t $ u =>
+      let
+        fun zproof p =
+          let
+            val thy = Context.certificate_theory cert handle ERROR msg =>
+              raise CONTEXT (msg, [], [], [th], NONE);
+          in ZTerm.symmetric_proof thy T t u p end;
+      in
+        Thm (deriv_rule1 zproof Proofterm.symmetric_proof der,
+         {cert = cert,
+          tags = [],
+          maxidx = maxidx,
+          constraints = constraints,
+          shyps = shyps,
+          hyps = hyps,
+          tpairs = tpairs,
+          prop = eq $ u $ t})
+      end
     | _ => raise THM ("symmetric", 0, [th]));
 
 (*Transitivity
@@ -1361,33 +1470,50 @@ fun transitive th1 th2 =
     fun err msg = raise THM ("transitive: " ^ msg, 0, [th1, th2]);
   in
     case (prop1, prop2) of
-      ((eq as Const ("Pure.eq", Type (_, [U, _]))) $ t1 $ u, Const ("Pure.eq", _) $ u' $ t2) =>
+      ((eq as Const ("Pure.eq", Type (_, [T, _]))) $ t1 $ u, Const ("Pure.eq", _) $ u' $ t2) =>
         if not (u aconv u') then err "middle term"
         else
-          Thm (deriv_rule2 (Proofterm.transitive_proof U u) der1 der2,
-           {cert = join_certificate2 (th1, th2),
-            tags = [],
-            maxidx = Int.max (maxidx1, maxidx2),
-            constraints = union_constraints constraints1 constraints2,
-            shyps = Sorts.union shyps1 shyps2,
-            hyps = union_hyps hyps1 hyps2,
-            tpairs = union_tpairs tpairs1 tpairs2,
-            prop = eq $ t1 $ t2})
-     | _ =>  err "premises"
+          let
+            val cert = join_certificate2 (th1, th2);
+            fun zproof p q =
+              let
+                val thy = Context.certificate_theory cert handle ERROR msg =>
+                  raise CONTEXT (msg, [], [], [th1, th2], NONE);
+              in ZTerm.transitive_proof thy T t1 u t2 p q end;
+            fun proof p = Proofterm.transitive_proof T u p;
+          in
+            Thm (deriv_rule2 zproof proof der1 der2,
+             {cert = cert,
+              tags = [],
+              maxidx = Int.max (maxidx1, maxidx2),
+              constraints = union_constraints constraints1 constraints2,
+              shyps = Sorts.union shyps1 shyps2,
+              hyps = union_hyps hyps1 hyps2,
+              tpairs = union_tpairs tpairs1 tpairs2,
+              prop = eq $ t1 $ t2})
+          end
+     | _ => err "premises"
   end;
 
 (*Beta-conversion
   (\<lambda>x. t) u \<equiv> t[u/x]
   fully beta-reduces the term if full = true
 *)
-fun beta_conversion full (Cterm {cert, t, T = _, maxidx, sorts}) =
-  let val t' =
-    if full then Envir.beta_norm t
-    else
-      (case t of Abs (_, _, bodt) $ u => subst_bound (u, bodt)
-      | _ => raise THM ("beta_conversion: not a redex", 0, []));
+fun beta_conversion full (ct as Cterm {cert, t, T, maxidx, sorts}) =
+  let
+    val t' =
+      if full then Envir.beta_norm t
+      else
+        (case t of Abs (_, _, bodt) $ u => subst_bound (u, bodt)
+        | _ => raise THM ("beta_conversion: not a redex", 0, []));
+    fun zproof () =
+      let
+        val thy = Context.certificate_theory cert handle ERROR msg =>
+          raise CONTEXT (msg, [], [ct], [], NONE);
+      in ZTerm.reflexive_proof thy T t end;
+    fun proof () = Proofterm.reflexive_proof;
   in
-    Thm (deriv_rule0 (fn () => Proofterm.reflexive_proof),
+    Thm (deriv_rule0 zproof proof,
      {cert = cert,
       tags = [],
       maxidx = maxidx,
@@ -1398,27 +1524,45 @@ fun beta_conversion full (Cterm {cert, t, T = _, maxidx, sorts}) =
       prop = Logic.mk_equals (t, t')})
   end;
 
-fun eta_conversion (Cterm {cert, t, T = _, maxidx, sorts}) =
-  Thm (deriv_rule0 (fn () => Proofterm.reflexive_proof),
-   {cert = cert,
-    tags = [],
-    maxidx = maxidx,
-    constraints = [],
-    shyps = sorts,
-    hyps = [],
-    tpairs = [],
-    prop = Logic.mk_equals (t, Envir.eta_contract t)});
+fun eta_conversion (ct as Cterm {cert, t, T, maxidx, sorts}) =
+  let
+    fun zproof () =
+      let
+        val thy = Context.certificate_theory cert handle ERROR msg =>
+          raise CONTEXT (msg, [], [ct], [], NONE);
+      in ZTerm.reflexive_proof thy T t end;
+    fun proof () = Proofterm.reflexive_proof;
+  in
+    Thm (deriv_rule0 zproof proof,
+     {cert = cert,
+      tags = [],
+      maxidx = maxidx,
+      constraints = [],
+      shyps = sorts,
+      hyps = [],
+      tpairs = [],
+      prop = Logic.mk_equals (t, Envir.eta_contract t)})
+  end;
 
-fun eta_long_conversion (Cterm {cert, t, T = _, maxidx, sorts}) =
-  Thm (deriv_rule0 (fn () => Proofterm.reflexive_proof),
-   {cert = cert,
-    tags = [],
-    maxidx = maxidx,
-    constraints = [],
-    shyps = sorts,
-    hyps = [],
-    tpairs = [],
-    prop = Logic.mk_equals (t, Envir.eta_long [] t)});
+fun eta_long_conversion (ct as Cterm {cert, t, T, maxidx, sorts}) =
+  let
+    fun zproof () =
+      let
+        val thy = Context.certificate_theory cert handle ERROR msg =>
+          raise CONTEXT (msg, [], [ct], [], NONE);
+      in ZTerm.reflexive_proof thy T t end;
+    fun proof () = Proofterm.reflexive_proof;
+  in
+    Thm (deriv_rule0 zproof proof,
+     {cert = cert,
+      tags = [],
+      maxidx = maxidx,
+      constraints = [],
+      shyps = sorts,
+      hyps = [],
+      tpairs = [],
+      prop = Logic.mk_equals (t, Envir.eta_long [] t)})
+  end;
 
 (*The abstraction rule.  The Free or Var x must not be free in the hypotheses.
   The bound variable will be named "a" (since x will be something like x320)
@@ -1427,25 +1571,37 @@ fun eta_long_conversion (Cterm {cert, t, T = _, maxidx, sorts}) =
   \<lambda>x. t \<equiv> \<lambda>x. u
 *)
 fun abstract_rule b
-    (Cterm {t = x, T, sorts, ...})
+    (ct as Cterm {t = x, T, sorts, ...})
     (th as Thm (der, {cert, maxidx, hyps, constraints, shyps, tpairs, prop, ...})) =
   let
-    val (t, u) = Logic.dest_equals prop
-      handle TERM _ => raise THM ("abstract_rule: premise not an equality", 0, [th]);
+    val (U, t, u) =
+      (case prop of
+        Const ("Pure.eq", Type ("fun", [U, _])) $ t $ u => (U, t, u)
+      | _ => raise THM ("abstract_rule: premise not an equality", 0, [th]));
     fun check_result a ts =
       if occs x ts tpairs then
         raise THM ("abstract_rule: variable " ^ quote a ^ " free in assumptions", 0, [th])
       else
-        Thm (deriv_rule1 (Proofterm.abstract_rule_proof (b, x)) der,
-         {cert = cert,
-          tags = [],
-          maxidx = maxidx,
-          constraints = constraints,
-          shyps = Sorts.union sorts shyps,
-          hyps = hyps,
-          tpairs = tpairs,
-          prop = Logic.mk_equals
-            (Abs (b, T, abstract_over (x, t)), Abs (b, T, abstract_over (x, u)))});
+        let
+          val f = Abs (b, T, abstract_over (x, t));
+          val g = Abs (b, T, abstract_over (x, u));
+          fun zproof p =
+            let
+              val thy = Context.certificate_theory cert handle ERROR msg =>
+                raise CONTEXT (msg, [], [ct], [th], NONE);
+            in ZTerm.abstract_rule_proof thy T U (b, x) f g p end;
+          fun proof p = Proofterm.abstract_rule_proof (b, x) p
+        in
+          Thm (deriv_rule1 zproof proof der,
+           {cert = cert,
+            tags = [],
+            maxidx = maxidx,
+            constraints = constraints,
+            shyps = Sorts.union sorts shyps,
+            hyps = hyps,
+            tpairs = tpairs,
+            prop = Logic.mk_equals (f, g)})
+        end;
   in
     (case x of
       Free (a, _) => check_result a hyps
@@ -1464,27 +1620,35 @@ fun combination th1 th2 =
         hyps = hyps1, tpairs = tpairs1, prop = prop1, ...}) = th1
     and Thm (der2, {maxidx = maxidx2, constraints = constraints2, shyps = shyps2,
         hyps = hyps2, tpairs = tpairs2, prop = prop2, ...}) = th2;
-    fun chktypes fT tT =
-      (case fT of
-        Type ("fun", [T1, _]) =>
-          if T1 <> tT then
-            raise THM ("combination: types", 0, [th1, th2])
-          else ()
-      | _ => raise THM ("combination: not function type", 0, [th1, th2]));
   in
     (case (prop1, prop2) of
       (Const ("Pure.eq", Type ("fun", [fT, _])) $ f $ g,
        Const ("Pure.eq", Type ("fun", [tT, _])) $ t $ u) =>
-        (chktypes fT tT;
-          Thm (deriv_rule2 (Proofterm.combination_proof f g t u) der1 der2,
-           {cert = join_certificate2 (th1, th2),
+        let
+          val U =
+            (case fT of
+              Type ("fun", [T1, U]) =>
+                if T1 = tT then U
+                else raise THM ("combination: types", 0, [th1, th2])
+            | _ => raise THM ("combination: not function type", 0, [th1, th2]));
+          val cert = join_certificate2 (th1, th2);
+          fun zproof p q =
+            let
+              val thy = Context.certificate_theory cert handle ERROR msg =>
+                raise CONTEXT (msg, [], [], [th1, th2], NONE);
+            in ZTerm.combination_proof thy fT U f g t u p q end;
+          fun proof p q = Proofterm.combination_proof f g t u p q;
+        in
+          Thm (deriv_rule2 zproof proof der1 der2,
+           {cert = cert,
             tags = [],
             maxidx = Int.max (maxidx1, maxidx2),
             constraints = union_constraints constraints1 constraints2,
             shyps = Sorts.union shyps1 shyps2,
             hyps = union_hyps hyps1 hyps2,
             tpairs = union_tpairs tpairs1 tpairs2,
-            prop = Logic.mk_equals (f $ t, g $ u)}))
+            prop = Logic.mk_equals (f $ t, g $ u)})
+        end
      | _ => raise THM ("combination: premises", 0, [th1, th2]))
   end;
 
@@ -1504,15 +1668,25 @@ fun equal_intr th1 th2 =
     (case (prop1, prop2) of
       (Const("Pure.imp", _) $ A $ B, Const("Pure.imp", _) $ B' $ A') =>
         if A aconv A' andalso B aconv B' then
-          Thm (deriv_rule2 (Proofterm.equal_intr_proof A B) der1 der2,
-           {cert = join_certificate2 (th1, th2),
-            tags = [],
-            maxidx = Int.max (maxidx1, maxidx2),
-            constraints = union_constraints constraints1 constraints2,
-            shyps = Sorts.union shyps1 shyps2,
-            hyps = union_hyps hyps1 hyps2,
-            tpairs = union_tpairs tpairs1 tpairs2,
-            prop = Logic.mk_equals (A, B)})
+          let
+            val cert = join_certificate2 (th1, th2);
+            fun proof p q = Proofterm.equal_intr_proof A B p q;
+            fun zproof p q =
+              let
+                val thy = Context.certificate_theory cert handle ERROR msg =>
+                  raise CONTEXT (msg, [], [], [th1, th2], NONE);
+              in ZTerm.equal_intr_proof thy A B p q end;
+          in
+            Thm (deriv_rule2 zproof proof der1 der2,
+             {cert = cert,
+              tags = [],
+              maxidx = Int.max (maxidx1, maxidx2),
+              constraints = union_constraints constraints1 constraints2,
+              shyps = Sorts.union shyps1 shyps2,
+              hyps = union_hyps hyps1 hyps2,
+              tpairs = union_tpairs tpairs1 tpairs2,
+              prop = Logic.mk_equals (A, B)})
+          end
         else err "not equal"
     | _ =>  err "premises")
   end;
@@ -1533,15 +1707,25 @@ fun equal_elim th1 th2 =
     (case prop1 of
       Const ("Pure.eq", _) $ A $ B =>
         if prop2 aconv A then
-          Thm (deriv_rule2 (Proofterm.equal_elim_proof A B) der1 der2,
-           {cert = join_certificate2 (th1, th2),
-            tags = [],
-            maxidx = Int.max (maxidx1, maxidx2),
-            constraints = union_constraints constraints1 constraints2,
-            shyps = Sorts.union shyps1 shyps2,
-            hyps = union_hyps hyps1 hyps2,
-            tpairs = union_tpairs tpairs1 tpairs2,
-            prop = B})
+          let
+            val cert = join_certificate2 (th1, th2);
+            fun proof p q = Proofterm.equal_elim_proof A B p q;
+            fun zproof p q =
+              let
+                val thy = Context.certificate_theory cert handle ERROR msg =>
+                  raise CONTEXT (msg, [], [], [th1, th2], NONE);
+              in ZTerm.equal_elim_proof thy A B p q end;
+          in
+            Thm (deriv_rule2 zproof proof der1 der2,
+             {cert = cert,
+              tags = [],
+              maxidx = Int.max (maxidx1, maxidx2),
+              constraints = union_constraints constraints1 constraints2,
+              shyps = Sorts.union shyps1 shyps2,
+              hyps = union_hyps hyps1 hyps2,
+              tpairs = union_tpairs tpairs1 tpairs2,
+              prop = B})
+          end
         else err "not equal"
      | _ =>  err "major premise")
   end;
@@ -1568,16 +1752,22 @@ fun flexflex_rule opt_ctxt =
               val tpairs' = tpairs |> map (apply2 (Envir.norm_term env))
                 (*remove trivial tpairs, of the form t \<equiv> t*)
                 |> filter_out (op aconv);
-              val der' = deriv_rule1 (Proofterm.norm_proof' env) der;
+              val prop' = Envir.norm_term env prop;
               val thy' = Context.certificate_theory cert' handle ERROR msg =>
                 raise CONTEXT (msg, [], [], [th], Option.map Context.Proof opt_ctxt);
-              val constraints' = insert_constraints_env thy' env constraints;
-              val prop' = Envir.norm_term env prop;
-              val maxidx = maxidx_tpairs tpairs' (maxidx_of_term prop');
-              val shyps = Envir.insert_sorts env shyps;
+
+              fun zproof p = ZTerm.norm_proof thy' env [full_prop_of th] p;
+              fun proof p = Proofterm.norm_proof_remove_types env p;
             in
-              Thm (der', {cert = cert', tags = [], maxidx = maxidx, constraints = constraints',
-                shyps = shyps, hyps = hyps, tpairs = tpairs', prop = prop'})
+              Thm (deriv_rule1 zproof proof der,
+               {cert = cert',
+                tags = [],
+                maxidx = maxidx_tpairs tpairs' (maxidx_of_term prop'),
+                constraints = insert_constraints_env thy' env constraints,
+                shyps = Envir.insert_sorts env shyps,
+                hyps = hyps,
+                tpairs = tpairs',
+                prop = prop'})
             end)
     end);
 
@@ -1611,8 +1801,11 @@ fun generalize (tfrees, frees) idx th =
       val prop' = generalize prop;
       val tpairs' = map (apply2 generalize) tpairs;
       val maxidx' = maxidx_tpairs tpairs' (maxidx_of_term prop');
+
+      val zproof = ZTerm.generalize_proof (tfrees, frees) idx;
+      val proof = Proofterm.generalize_proof (tfrees, frees) idx prop;
     in
-      Thm (deriv_rule1 (Proofterm.generalize_proof (tfrees, frees) idx prop) der,
+      Thm (deriv_rule1 zproof proof der,
        {cert = cert,
         tags = [],
         maxidx = maxidx',
@@ -1716,9 +1909,15 @@ fun gen_instantiate inst_fn (instT, inst) th =
       val constraints' =
         TVars.fold (fn ((_, S), (T, _)) => insert_constraints thy' (T, S))
           instT' constraints;
+
+      fun zproof p =
+        ZTerm.instantiate_proof thy'
+          (TVars.fold (fn (v, (T, _)) => cons (v, T)) instT' [],
+           Vars.fold (fn (v, (t, _)) => cons (v, t)) inst' []) p;
+      fun proof p =
+        Proofterm.instantiate (TVars.map (K #1) instT', Vars.map (K #1) inst') p;
     in
-      Thm (deriv_rule1
-        (fn d => Proofterm.instantiate (TVars.map (K #1) instT', Vars.map (K #1) inst') d) der,
+      Thm (deriv_rule1 zproof proof der,
        {cert = cert',
         tags = [],
         maxidx = maxidx',
@@ -1755,19 +1954,28 @@ end;
 
 (*The trivial implication A \<Longrightarrow> A, justified by assume and forall rules.
   A can contain Vars, not so for assume!*)
-fun trivial (Cterm {cert, t = A, T, maxidx, sorts}) =
+fun trivial (ct as Cterm {cert, t = A, T, maxidx, sorts}) =
   if T <> propT then
     raise THM ("trivial: the term must have type prop", 0, [])
   else
-    Thm (deriv_rule0 (fn () => Proofterm.trivial_proof),
-     {cert = cert,
-      tags = [],
-      maxidx = maxidx,
-      constraints = [],
-      shyps = sorts,
-      hyps = [],
-      tpairs = [],
-      prop = Logic.mk_implies (A, A)});
+    let
+      fun zproof () =
+        let
+          val thy = Context.certificate_theory cert handle ERROR msg =>
+            raise CONTEXT (msg, [], [ct], [], NONE);
+        in ZTerm.trivial_proof thy A end;
+      fun proof () = Proofterm.trivial_proof;
+    in
+      Thm (deriv_rule0 zproof proof,
+       {cert = cert,
+        tags = [],
+        maxidx = maxidx,
+        constraints = [],
+        shyps = sorts,
+        hyps = [],
+        tpairs = [],
+        prop = Logic.mk_implies (A, A)})
+    end;
 
 (*Axiom-scheme reflecting signature contents
         T :: c
@@ -1781,9 +1989,12 @@ fun of_class (cT, raw_c) =
       handle ERROR msg => raise CONTEXT (msg, [cT], [], [], NONE);
     val c = Sign.certify_class thy raw_c;
     val Cterm {t = prop, maxidx, sorts, ...} = global_cterm_of thy (Logic.mk_of_class (T, c));
+
+    fun zproof () = ZTerm.of_class_proof (T, c);
+    fun proof () = Proofterm.PClass (T, c);
   in
     if Sign.of_sort thy (T, [c]) then
-      Thm (deriv_rule0 (fn () => Proofterm.PClass (T, c)),
+      Thm (deriv_rule0 zproof proof,
        {cert = cert,
         tags = [],
         maxidx = maxidx,
@@ -1795,7 +2006,7 @@ fun of_class (cT, raw_c) =
     else raise THM ("of_class: type not of class " ^ Syntax.string_of_sort_global thy [c], 0, [])
   end |> solve_constraints;
 
-(*Internalize sort constraints of type variables*)
+(*Sort constraints within the logic*)
 val unconstrainT =
   strip_shyps #> (fn thm as Thm (der, args) =>
     let
@@ -1810,13 +2021,9 @@ val unconstrainT =
       val _ = null tfrees orelse err ("illegal free type variables " ^ commas_quote tfrees);
 
       val ps = map (apsnd (Future.map fulfill_body)) promises;
-      val (pthm, proof) =
-        Proofterm.unconstrain_thm_proof thy (classrel_proof thy) (arity_proof thy)
-          shyps prop ps body;
-      val der' = make_deriv [] [] [pthm] proof;
-      val prop' = Proofterm.thm_node_prop (#2 pthm);
+      val (prop', body') = Proofterm.unconstrain_thm_proof thy (sorts_proof thy) shyps prop ps body;
     in
-      Thm (der',
+      Thm (make_deriv0 [] body',
        {cert = cert,
         tags = [],
         maxidx = maxidx_of_term prop',
@@ -1834,8 +2041,10 @@ fun varifyT_global' fixed (Thm (der, {cert, maxidx, constraints, shyps, hyps, tp
     val prop1 = attach_tpairs tpairs prop;
     val (al, prop2) = Type.varify_global tfrees prop1;
     val (ts, prop3) = Logic.strip_prems (length tpairs, [], prop2);
+    fun zproof p = ZTerm.varifyT_proof al p;
+    fun proof p = Proofterm.varifyT_proof al p;
   in
-    (al, Thm (deriv_rule1 (Proofterm.varify_proof prop tfrees) der,
+    (al, Thm (deriv_rule1 zproof proof der,
      {cert = cert,
       tags = [],
       maxidx = Int.max (0, maxidx),
@@ -1854,8 +2063,10 @@ fun legacy_freezeT (Thm (der, {cert, constraints, shyps, hyps, tpairs, prop, ...
     val prop1 = attach_tpairs tpairs prop;
     val prop2 = Type.legacy_freeze prop1;
     val (ts, prop3) = Logic.strip_prems (length tpairs, [], prop2);
+    fun zproof p = ZTerm.legacy_freezeT_proof prop1 p;
+    fun proof p = Proofterm.legacy_freezeT prop1 p;
   in
-    Thm (deriv_rule1 (Proofterm.legacy_freezeT prop1) der,
+    Thm (deriv_rule1 zproof proof der,
      {cert = cert,
       tags = [],
       maxidx = maxidx_of_term prop2,
@@ -1881,6 +2092,35 @@ fun plain_prop_of raw_thm =
   end;
 
 
+(* stored thms: zproof *)
+
+val get_zproof_serials = Inttab.keys o get_zproofs;
+
+fun get_zproof thy =
+  Inttab.lookup (get_zproofs thy) #> Option.map (fn {name, thm} =>
+    let
+      val thm' = transfer thy thm;
+      val PBody {zboxes, zproof, ...} = proof_body_of thm';
+    in {name = name, thm = thm', zboxes = zboxes, zproof = zproof} end);
+
+fun store_zproof name thm thy =
+  let
+    val Thm (Deriv {promises, body = PBody body}, args as {hyps, prop, ...}) = thm;
+    val {oracles, thms, zboxes, zproof, proof} = body;
+    fun deriv a b = make_deriv promises oracles thms a b proof;
+
+    val _ = null promises orelse
+      raise THM ("store_zproof: theorem may not use promises", 0, [thm]);
+
+    val ((i, (_, zproof1)), zproof2) = ZTerm.thm_proof thy name hyps prop zproof;
+    val der1 = if Options.default_bool "prune_proofs" then deriv [] ZDummy else deriv zboxes zproof1;
+    val der2 = deriv [] zproof2;
+
+    val thm' = trim_context (Thm (der1, args));
+    val thy' = thy |> (map_zproofs o Inttab.update) (i, {name = name, thm = thm'});
+  in (Thm (der2, args), thy') end;
+
+
 
 (*** Inference rules for tactics ***)
 
@@ -1904,30 +2144,46 @@ fun lift_rule goal orule =
   in
     if T <> propT then raise THM ("lift_rule: the term must have type prop", 0, [])
     else
-      Thm (deriv_rule1 (Proofterm.lift_proof gprop inc prop) der,
-       {cert = join_certificate1 (goal, orule),
-        tags = [],
-        maxidx = maxidx + inc,
-        constraints = constraints,
-        shyps = Sorts.union shyps sorts,  (*sic!*)
-        hyps = hyps,
-        tpairs = map (apply2 lift_abs) tpairs,
-        prop = Logic.list_implies (map lift_all As, lift_all B)})
+      let
+        val cert = join_certificate1 (goal, orule);
+        val prems = map lift_all As;
+        fun zproof p =
+          let
+            val thy = Context.certificate_theory cert
+              handle ERROR msg => raise CONTEXT (msg, [], [goal], [orule], NONE);
+          in ZTerm.lift_proof thy gprop inc prems p end;
+        fun proof p = Proofterm.lift_proof gprop inc prems p;
+      in
+        Thm (deriv_rule1 zproof proof der,
+         {cert = cert,
+          tags = [],
+          maxidx = maxidx + inc,
+          constraints = constraints,
+          shyps = Sorts.union shyps sorts,  (*sic!*)
+          hyps = hyps,
+          tpairs = map (apply2 lift_abs) tpairs,
+          prop = Logic.list_implies (prems, lift_all B)})
+      end
   end;
 
 fun incr_indexes i (thm as Thm (der, {cert, maxidx, constraints, shyps, hyps, tpairs, prop, ...})) =
   if i < 0 then raise THM ("negative increment", 0, [thm])
   else if i = 0 then thm
   else
-    Thm (deriv_rule1 (Proofterm.incr_indexes i) der,
-     {cert = cert,
-      tags = [],
-      maxidx = maxidx + i,
-      constraints = constraints,
-      shyps = shyps,
-      hyps = hyps,
-      tpairs = map (apply2 (Logic.incr_indexes ([], [], i))) tpairs,
-      prop = Logic.incr_indexes ([], [], i) prop});
+    let
+      fun zproof p = ZTerm.incr_indexes_proof i p;
+      fun proof p = Proofterm.incr_indexes i p;
+    in
+      Thm (deriv_rule1 zproof proof der,
+       {cert = cert,
+        tags = [],
+        maxidx = maxidx + i,
+        constraints = constraints,
+        shyps = shyps,
+        hyps = hyps,
+        tpairs = map (apply2 (Logic.incr_indexes ([], i))) tpairs,
+        prop = Logic.incr_indexes ([], i) prop})
+    end;
 
 (*Solve subgoal Bi of proof state B1...Bn/C by assumption. *)
 fun assumption opt_ctxt i state =
@@ -1937,14 +2193,15 @@ fun assumption opt_ctxt i state =
     val (tpairs, Bs, Bi, C) = dest_state (state, i);
     fun newth n (env, tpairs) =
       let
-        val normt = Envir.norm_term env;
-        fun assumption_proof prf =
-          Proofterm.assumption_proof (map normt Bs) (normt Bi) n prf;
         val thy' = Context.certificate_theory cert' handle ERROR msg =>
           raise CONTEXT (msg, [], [], [state], Option.map Context.Proof opt_ctxt);
+        val normt = Envir.norm_term env;
+        fun zproof p = ZTerm.assumption_proof thy' env Bs Bi n [full_prop_of state] p;
+        fun proof p =
+          Proofterm.assumption_proof (map normt Bs) (normt Bi) n p
+          |> not (Envir.is_empty env) ? Proofterm.norm_proof_remove_types env;
       in
-        Thm (deriv_rule1
-          (assumption_proof #> not (Envir.is_empty env) ? Proofterm.norm_proof' env) der,
+        Thm (deriv_rule1 zproof proof der,
          {tags = [],
           maxidx = Envir.maxidx_of env,
           constraints = insert_constraints_env thy' env constraints,
@@ -1952,7 +2209,8 @@ fun assumption opt_ctxt i state =
           hyps = hyps,
           tpairs = if Envir.is_empty env then tpairs else map (apply2 normt) tpairs,
           prop =
-            if Envir.is_empty env then Logic.list_implies (Bs, C) (*avoid wasted normalizations*)
+            if Envir.is_empty env
+            then Logic.list_implies (Bs, C) (*avoid wasted normalizations*)
             else normt (Logic.list_implies (Bs, C)) (*normalize the new rule fully*),
           cert = cert'})
       end;
@@ -1979,15 +2237,24 @@ fun eq_assumption i state =
     (case find_index (fn asm => Envir.aeconv (asm, concl)) asms of
       ~1 => raise THM ("eq_assumption", 0, [state])
     | n =>
-        Thm (deriv_rule1 (Proofterm.assumption_proof Bs Bi (n + 1)) der,
-         {cert = cert,
-          tags = [],
-          maxidx = maxidx,
-          constraints = constraints,
-          shyps = shyps,
-          hyps = hyps,
-          tpairs = tpairs,
-          prop = Logic.list_implies (Bs, C)}))
+        let
+          fun zproof p =
+            let
+              val thy = Context.certificate_theory cert
+                handle ERROR msg => raise CONTEXT (msg, [], [], [state], NONE);
+            in ZTerm.assumption_proof thy Envir.init Bs Bi (n + 1) [] p end;
+          fun proof p = Proofterm.assumption_proof Bs Bi (n + 1) p;
+        in
+          Thm (deriv_rule1 zproof proof der,
+           {cert = cert,
+            tags = [],
+            maxidx = maxidx,
+            constraints = constraints,
+            shyps = shyps,
+            hyps = hyps,
+            tpairs = tpairs,
+            prop = Logic.list_implies (Bs, C)})
+        end)
   end;
 
 
@@ -2008,8 +2275,15 @@ fun rotate_rule k i state =
         let val (ps, qs) = chop m asms
         in Logic.list_all (params, Logic.list_implies (qs @ ps, concl)) end
       else raise THM ("rotate_rule", k, [state]);
+
+    fun zproof p =
+      let
+        val thy = Context.certificate_theory cert
+          handle ERROR msg => raise CONTEXT (msg, [], [], [state], NONE);
+      in ZTerm.rotate_proof thy Bs Bi' params asms m p end;
+    fun proof p = Proofterm.rotate_proof Bs Bi' params asms m p;
   in
-    Thm (deriv_rule1 (Proofterm.rotate_proof Bs Bi' params asms m) der,
+    Thm (deriv_rule1 zproof proof der,
      {cert = cert,
       tags = [],
       maxidx = maxidx,
@@ -2042,8 +2316,15 @@ fun permute_prems j k rl =
           val prems' = fixed_prems @ qs @ ps;
         in (prems', Logic.list_implies (prems', concl)) end
       else raise THM ("permute_prems: k", k, [rl]);
+
+    fun zproof p =
+      let
+        val thy = Context.certificate_theory cert
+          handle ERROR msg => raise CONTEXT (msg, [], [], [rl], NONE);
+      in ZTerm.permute_prems_proof thy prems' j m p end;
+    fun proof p = Proofterm.permute_prems_proof prems' j m p;
   in
-    Thm (deriv_rule1 (Proofterm.permute_prems_proof prems' j m) der,
+    Thm (deriv_rule1 zproof proof der,
      {cert = cert,
       tags = [],
       maxidx = maxidx,
@@ -2058,11 +2339,12 @@ fun permute_prems j k rl =
 (* strip_apply f B A strips off all assumptions/parameters from A
    introduced by lifting over B, and applies f to remaining part of A*)
 fun strip_apply f =
-  let fun strip (Const ("Pure.imp", _) $ _  $ B1)
-                (Const ("Pure.imp", _) $ A2 $ B2) = Logic.mk_implies (A2, strip B1 B2)
-        | strip ((c as Const ("Pure.all", _)) $ Abs (_, _, t1))
-                (      Const ("Pure.all", _)  $ Abs (a, T, t2)) = c $ Abs (a, T, strip t1 t2)
-        | strip _ A = f A
+  let
+    fun strip ((c as Const ("Pure.imp", _)) $ _  $ B1)
+                    (Const ("Pure.imp", _) $ A2 $ B2) = c $ A2 $ strip B1 B2
+      | strip ((c as Const ("Pure.all", _)) $ Abs (_, _, t1))
+                    (Const ("Pure.all", _) $ Abs (a, T, t2)) = c $ Abs (a, T, strip t1 t2)
+      | strip _ A = f A
   in strip end;
 
 fun strip_lifted (Const ("Pure.imp", _) $ _ $ B1)
@@ -2074,43 +2356,54 @@ fun strip_lifted (Const ("Pure.imp", _) $ _ $ B1)
 (*Use the alist to rename all bound variables and some unknowns in a term
   dpairs = current disagreement pairs;  tpairs = permanent ones (flexflex);
   Preserves unknowns in tpairs and on lhs of dpairs. *)
-fun rename_bvs [] _ _ _ _ = K I
-  | rename_bvs al dpairs tpairs B As =
+fun rename_bvs dpairs tpairs B As =
+  let val al = fold_rev Term.match_bvars dpairs [] in
+    if null al then {vars = Symtab.empty, bounds = Symtab.empty}
+    else
       let
-        val add_var = fold_aterms (fn Var ((x, _), _) => insert (op =) x | _ => I);
-        val vids = []
-          |> fold (add_var o fst) dpairs
-          |> fold (add_var o fst) tpairs
-          |> fold (add_var o snd) tpairs;
-        val vids' = fold (add_var o strip_lifted B) As [];
+        val add_var = fold_aterms (fn Var ((x, _), _) => Symset.insert x | _ => I);
+        val unknowns =
+          Symset.build
+           (fold (add_var o fst) dpairs #>
+            fold (fn (t, u) => add_var t #> add_var u) tpairs);
+
         (*unknowns appearing elsewhere be preserved!*)
-        val al' = distinct ((op =) o apply2 fst)
-          (filter_out (fn (x, y) =>
-             not (member (op =) vids' x) orelse
-             member (op =) vids x orelse member (op =) vids y) al);
-        val unchanged = filter_out (AList.defined (op =) al') vids';
+        val unknowns' = Symset.build (fold (add_var o strip_lifted B) As);
+        val al' = al
+          |> filter_out (fn (x, y) =>
+             not (Symset.member unknowns' x) orelse
+             Symset.member unknowns x orelse Symset.member unknowns y)
+          |> distinct (eq_fst (op =));
+        val unchanged = Symset.restrict (not o AList.defined (op =) al') unknowns';
+
+        (*avoid introducing name clashes between schematic variables*)
         fun del_clashing clash xs _ [] qs =
               if clash then del_clashing false xs xs qs [] else qs
           | del_clashing clash xs ys ((p as (x, y)) :: ps) qs =
-              if member (op =) ys y
-              then del_clashing true (x :: xs) (x :: ys) ps qs
-              else del_clashing clash xs (y :: ys) ps (p :: qs);
+              if Symset.member ys y
+              then del_clashing true (Symset.insert x xs) (Symset.insert x ys) ps qs
+              else del_clashing clash xs (Symset.insert y ys) ps (p :: qs);
         val al'' = del_clashing false unchanged unchanged al' [];
-        fun rename (t as Var ((x, i), T)) =
-              (case AList.lookup (op =) al'' x of
-                 SOME y => Var ((y, i), T)
-               | NONE => t)
-          | rename (Abs (x, T, t)) =
-              Abs (the_default x (AList.lookup (op =) al x), T, rename t)
-          | rename (f $ t) = rename f $ rename t
-          | rename t = t;
-        fun strip_ren f Ai = f rename B Ai
-      in strip_ren end;
+
+      in {vars = Symtab.make_distinct al'', bounds = Symtab.make_distinct al} end
+  end;
 
 (*Function to rename bounds/unknowns in the argument, lifted over B*)
-fun rename_bvars dpairs =
-  rename_bvs (fold_rev Term.match_bvars dpairs []) dpairs;
-
+fun rename_bvars dpairs tpairs B As =
+  let val {vars, bounds} = rename_bvs dpairs tpairs B As in
+    if Symtab.forall (op =) vars andalso Symtab.forall (op =) bounds then NONE
+    else
+      let
+        fun term (Var ((x, i), T)) =
+              let val y = perhaps (Symtab.lookup vars) x
+              in if x = y then raise Same.SAME else Var ((y, i), T) end
+          | term (Abs (x, T, t)) =
+              let val y = perhaps (Symtab.lookup bounds) x
+              in if x = y then Abs (x, T, term t) else Abs (y, T, Same.commit term t) end
+          | term (t $ u) = (term t $ Same.commit term u handle Same.SAME => t $ term u)
+          | term _ = raise Same.SAME;
+      in SOME term end
+  end;
 
 
 (*** RESOLUTION ***)
@@ -2161,109 +2454,112 @@ fun unify_var_types context (th1, th2) env =
   nsubgoal is the number of new subgoals (written m above).
   Curried so that resolution calls dest_state only once.
 *)
-local exception COMPOSE
-in
-fun bicompose_aux opt_ctxt {flatten, match, incremented} (state, (stpairs, Bs, Bi, C), lifted)
-                        (eres_flg, orule, nsubgoal) =
- let val Thm (sder, {maxidx=smax, constraints = constraints2, shyps = shyps2, hyps = hyps2, ...}) = state
-     and Thm (rder, {maxidx=rmax, constraints = constraints1, shyps = shyps1, hyps = hyps1,
-             tpairs=rtpairs, prop=rprop,...}) = orule
-         (*How many hyps to skip over during normalization*)
-     and nlift = Logic.count_prems (strip_all_body Bi) + (if eres_flg then ~1 else 0)
-     val (context, cert) =
-       make_context_certificate [state, orule] opt_ctxt (join_certificate2 (state, orule));
-     (*Add new theorem with prop = "\<lbrakk>Bs; As\<rbrakk> \<Longrightarrow> C" to thq*)
-     fun addth A (As, oldAs, rder', n) ((env, tpairs), thq) =
-       let val normt = Envir.norm_term env;
-           (*perform minimal copying here by examining env*)
-           val (ntpairs, normp) =
-             if Envir.is_empty env then (tpairs, (Bs @ As, C))
-             else
-             let val ntps = map (apply2 normt) tpairs
-             in if Envir.above env smax then
-                  (*no assignments in state; normalize the rule only*)
-                  if lifted
-                  then (ntps, (Bs @ map (norm_term_skip env nlift) As, C))
-                  else (ntps, (Bs @ map normt As, C))
-                else if match then raise COMPOSE
-                else (*normalize the new rule fully*)
-                  (ntps, (map normt (Bs @ As), normt C))
-             end
-           val thy' = Context.certificate_theory cert handle ERROR msg =>
-            raise CONTEXT (msg, [], [], [state, orule], Option.map Context.Proof opt_ctxt);
-           val constraints' =
-             union_constraints constraints1 constraints2
-             |> insert_constraints_env thy' env;
-           fun bicompose_proof prf1 prf2 =
-             Proofterm.bicompose_proof flatten (map normt Bs) (map normt As) A oldAs n (nlift+1)
-               prf1 prf2
-           val th =
-             Thm (deriv_rule2
-                   (if Envir.is_empty env then bicompose_proof
-                    else if Envir.above env smax then bicompose_proof o Proofterm.norm_proof' env
-                    else Proofterm.norm_proof' env oo bicompose_proof) rder' sder,
-                {tags = [],
-                 maxidx = Envir.maxidx_of env,
-                 constraints = constraints',
-                 shyps = Envir.insert_sorts env (Sorts.union shyps1 shyps2),
-                 hyps = union_hyps hyps1 hyps2,
-                 tpairs = ntpairs,
-                 prop = Logic.list_implies normp,
-                 cert = cert})
-        in  Seq.cons th thq  end  handle COMPOSE => thq;
-     val (rAs,B) = Logic.strip_prems(nsubgoal, [], rprop)
-       handle TERM _ => raise THM("bicompose: rule", 0, [orule,state]);
-     (*Modify assumptions, deleting n-th if n>0 for e-resolution*)
-     fun newAs(As0, n, dpairs, tpairs) =
-       let val (As1, rder') =
-         if not lifted then (As0, rder)
-         else
-           let val rename = rename_bvars dpairs tpairs B As0
-           in (map (rename strip_apply) As0,
-             deriv_rule1 (Proofterm.map_proof_terms (rename K) I) rder)
-           end;
-       in (map (if flatten then (Logic.flatten_params n) else I) As1, As1, rder', n)
-          handle TERM _ =>
-          raise THM("bicompose: 1st premise", 0, [orule])
-       end;
-     val BBi = if lifted then strip_assums2(B,Bi) else (B,Bi);
-     val dpairs = BBi :: (rtpairs@stpairs);
+local exception COMPOSE in
 
-     (*elim-resolution: try each assumption in turn*)
-     fun eres _ [] = raise THM ("bicompose: no premises", 0, [orule, state])
-       | eres env (A1 :: As) =
-           let
-             val A = SOME A1;
-             val (close, asms, concl) = Logic.assum_problems (nlift + 1, A1);
-             val concl' = close concl;
-             fun tryasms [] _ = Seq.empty
-               | tryasms (asm :: rest) n =
-                   if Term.could_unify (asm, concl) then
-                     let val asm' = close asm in
-                       (case Seq.pull (Unify.unifiers (context, env, (asm', concl') :: dpairs)) of
-                         NONE => tryasms rest (n + 1)
-                       | cell as SOME ((_, tpairs), _) =>
-                           Seq.it_right (addth A (newAs (As, n, [BBi, (concl', asm')], tpairs)))
-                             (Seq.make (fn () => cell),
-                              Seq.make (fn () => Seq.pull (tryasms rest (n + 1)))))
-                     end
-                   else tryasms rest (n + 1);
-           in tryasms asms 1 end;
+fun bicompose_aux opt_ctxt {flatten, match, incremented} (state, (stpairs, Bs, Bi, C), lifted)
+    (eres_flg, orule, nsubgoal) =
+  let
+    val Thm (sder, {maxidx=smax, constraints = constraints2, shyps = shyps2, hyps = hyps2, ...}) = state
+    and Thm (rder, {maxidx=rmax, constraints = constraints1, shyps = shyps1, hyps = hyps1,
+              tpairs = rtpairs, prop = rprop, ...}) = orule
+    (*How many hyps to skip over during normalization*)
+    and nlift = Logic.count_prems (strip_all_body Bi) + (if eres_flg then ~1 else 0);
+    val (context, cert) =
+      make_context_certificate [state, orule] opt_ctxt (join_certificate2 (state, orule));
+    (*Add new theorem with prop = "\<lbrakk>Bs; As\<rbrakk> \<Longrightarrow> C" to thq*)
+    fun addth A (As, oldAs, rder', n) ((env, tpairs), thq) =
+      let
+        val normt = Envir.norm_term env;
+        (*perform minimal copying here by examining env*)
+        val (ntpairs, normp) =
+          if Envir.is_empty env then (tpairs, (Bs @ As, C))
+          else
+            let val ntps = map (apply2 normt) tpairs in
+              if Envir.above env smax then
+                (*no assignments in state; normalize the rule only*)
+                if lifted
+                then (ntps, (Bs @ map (norm_term_skip env nlift) As, C))
+                else (ntps, (Bs @ map normt As, C))
+              else if match then raise COMPOSE
+              else (*normalize the new rule fully*)
+                (ntps, (map normt (Bs @ As), normt C))
+            end;
+        val thy' = Context.certificate_theory cert handle ERROR msg =>
+          raise CONTEXT (msg, [], [], [state, orule], Option.map Context.Proof opt_ctxt);
+        val constraints' =
+          union_constraints constraints1 constraints2
+          |> insert_constraints_env thy' env;
+        fun zproof p q =
+          ZTerm.bicompose_proof thy' env smax flatten Bs As A oldAs n (nlift + 1)
+            [full_prop_of state, full_prop_of orule] p q;
+        fun proof p q =
+          Proofterm.bicompose_proof env smax flatten Bs As A oldAs n (nlift + 1) p q;
+        val th =
+          Thm (deriv_rule2 zproof proof rder' sder,
+           {tags = [],
+            maxidx = Envir.maxidx_of env,
+            constraints = constraints',
+            shyps = Envir.insert_sorts env (Sorts.union shyps1 shyps2),
+            hyps = union_hyps hyps1 hyps2,
+            tpairs = ntpairs,
+            prop = Logic.list_implies normp,
+            cert = cert})
+      in Seq.cons th thq end handle COMPOSE => thq;
+    val (rAs, B) = Logic.strip_prems (nsubgoal, [], rprop)
+       handle TERM _ => raise THM("bicompose: rule", 0, [orule, state]);
+    (*Modify assumptions, deleting n-th if n>0 for e-resolution*)
+    fun newAs (As0, n, dpairs, tpairs) =
+      let val (As1, rder') =
+        if lifted then
+          (case rename_bvars dpairs tpairs B As0 of
+            SOME term =>
+              let fun proof p = Same.commit (Proofterm.map_proof_terms_same term I) p;
+              in (map (strip_apply (Same.commit term) B) As0, deriv_rule1 I proof rder) end
+          | NONE => (As0, rder))
+        else (As0, rder);
+      in
+        (if flatten then map (Logic.flatten_params n) As1 else As1, As1, rder', n)
+          handle TERM _ => raise THM("bicompose: 1st premise", 0, [orule])
+      end;
+    val BBi = if lifted then strip_assums2 (B, Bi) else (B, Bi);
+    val dpairs = BBi :: (rtpairs @ stpairs);
+
+    (*elim-resolution: try each assumption in turn*)
+    fun eres _ [] = raise THM ("bicompose: no premises", 0, [orule, state])
+      | eres env (A1 :: As) =
+          let
+            val A = SOME A1;
+            val (close, asms, concl) = Logic.assum_problems (nlift + 1, A1);
+            val concl' = close concl;
+            fun tryasms [] _ = Seq.empty
+              | tryasms (asm :: rest) n =
+                  if Term.could_unify (asm, concl) then
+                    let val asm' = close asm in
+                      (case Seq.pull (Unify.unifiers (context, env, (asm', concl') :: dpairs)) of
+                        NONE => tryasms rest (n + 1)
+                      | cell as SOME ((_, tpairs), _) =>
+                          Seq.it_right (addth A (newAs (As, n, [BBi, (concl', asm')], tpairs)))
+                            (Seq.make (fn () => cell),
+                             Seq.make (fn () => Seq.pull (tryasms rest (n + 1)))))
+                    end
+                  else tryasms rest (n + 1);
+          in tryasms asms 1 end;
 
      (*ordinary resolution*)
-     fun res env =
-       (case Seq.pull (Unify.unifiers (context, env, dpairs)) of
-         NONE => Seq.empty
-       | cell as SOME ((_, tpairs), _) =>
-           Seq.it_right (addth NONE (newAs (rev rAs, 0, [BBi], tpairs)))
-             (Seq.make (fn () => cell), Seq.empty));
+    fun res env =
+      (case Seq.pull (Unify.unifiers (context, env, dpairs)) of
+        NONE => Seq.empty
+      | cell as SOME ((_, tpairs), _) =>
+          Seq.it_right (addth NONE (newAs (rev rAs, 0, [BBi], tpairs)))
+            (Seq.make (fn () => cell), Seq.empty));
 
-     val env0 = Envir.empty (Int.max (rmax, smax));
- in
-   (case if incremented then SOME env0 else unify_var_types context (state, orule) env0 of
-     NONE => Seq.empty
-   | SOME env => if eres_flg then eres env (rev rAs) else res env)
- end;
+    val env0 = Envir.empty (Int.max (rmax, smax));
+  in
+    (case if incremented then SOME env0 else unify_var_types context (state, orule) env0 of
+      NONE => Seq.empty
+    | SOME env => if eres_flg then eres env (rev rAs) else res env)
+  end;
+
 end;
 
 fun bicompose opt_ctxt flags arg i state =

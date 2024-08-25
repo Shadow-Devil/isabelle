@@ -127,7 +127,7 @@ fun type_name kind check = Args.context -- Scan.lift (Parse.token Parse.embedded
 
 val _ = Theory.setup
  (ML_Antiquotation.inline_embedded \<^binding>\<open>type_name\<close>
-    (type_name "logical type" (fn (c, Type.LogicalType _) => c)) #>
+    (type_name "logical type" (fn (c, Type.Logical_Type _) => c)) #>
   ML_Antiquotation.inline_embedded \<^binding>\<open>type_abbrev\<close>
     (type_name "type abbreviation" (fn (c, Type.Abbreviation _) => c)) #>
   ML_Antiquotation.inline_embedded \<^binding>\<open>nonterminal\<close>
@@ -150,7 +150,7 @@ fun const_name check = Args.context -- Scan.lift (Parse.token Parse.embedded)
 
 val _ = Theory.setup
  (ML_Antiquotation.inline_embedded \<^binding>\<open>const_name\<close>
-    (const_name (fn (consts, c) => (Consts.the_const consts c; c))) #>
+    (const_name (fn (consts, c) => (Consts.the_const_type consts c; c))) #>
   ML_Antiquotation.inline_embedded \<^binding>\<open>const_abbrev\<close>
     (const_name (fn (consts, c) => (Consts.the_abbreviation consts c; c))) #>
   ML_Antiquotation.inline_embedded \<^binding>\<open>const_syntax\<close>
@@ -229,11 +229,11 @@ val ml_string = ml o ML_Syntax.print_string;
 fun ml_pair (x, y) = ml_parens (ml_commas [x, y]);
 
 fun type_antiquotation binding {function} =
-  ML_Context.add_antiquotation binding true
-    (fn range => fn src => fn ctxt =>
+  ML_Context.add_antiquotation_embedded binding
+    (fn range => fn input => fn ctxt =>
       let
-        val ((s, type_args), fn_body) = src
-          |> Parse.read_embedded_src ctxt keywords (parse_name_args -- parse_body function);
+        val ((s, type_args), fn_body) = input
+          |> Parse.read_embedded ctxt keywords (parse_name_args -- parse_body function);
         val pos = Input.pos_of s;
 
         val Type (c, Ts) =
@@ -264,11 +264,11 @@ fun type_antiquotation binding {function} =
       in (decl', ctxt2) end);
 
 fun const_antiquotation binding {pattern, function} =
-  ML_Context.add_antiquotation binding true
-    (fn range => fn src => fn ctxt =>
+  ML_Context.add_antiquotation_embedded binding
+    (fn range => fn input => fn ctxt =>
       let
-        val (((s, type_args), term_args), fn_body) = src
-          |> Parse.read_embedded_src ctxt keywords
+        val (((s, type_args), term_args), fn_body) = input
+          |> Parse.read_embedded ctxt keywords
               (parse_name_args -- parse_for_args -- parse_body function);
 
         val Const (c, T) =
@@ -340,18 +340,72 @@ val _ = Theory.setup
 in end;
 
 
-(* special forms for option type *)
+(* exception handling *)
+
+local
+
+val tokenize_text = map Antiquote.Text o ML_Lex.tokenize_no_range;
+val tokenize_range_text = map Antiquote.Text oo ML_Lex.tokenize_range;
+
+val bg_expr = tokenize_text "(fn () =>";
+val en_expr = tokenize_text ")";
+fun make_expr a = bg_expr @ a @ en_expr;
+
+fun make_handler range a =
+  tokenize_range_text range "(fn" @ a @
+  tokenize_range_text range "| exn => Exn.reraise exn)";
+
+fun report_special tok = (ML_Lex.pos_of tok, Markup.keyword3);
+
+fun print_special tok =
+  let val (pos, markup) = report_special tok
+  in Markup.markup markup (ML_Lex.content_of tok) ^ Position.here pos end;
+
+val is_catch = ML_Lex.is_ident_with (fn x => x = "catch");
+val is_finally = ML_Lex.is_ident_with (fn x => x = "finally");
+fun is_special t = is_catch t orelse is_finally t;
+val is_special_text = fn Antiquote.Text t => is_special t | _ => false;
+
+fun parse_try ctxt input =
+  let
+    val ants = ML_Lex.read_source input;
+    val specials = ants
+      |> map_filter (fn Antiquote.Text t => if is_special t then SOME t else NONE | _ => NONE);
+    val _ = Context_Position.reports ctxt (map report_special specials);
+  in
+    (case specials of
+      [] => ("Isabelle_Thread.try", [make_expr ants])
+    | [s] =>
+        let val (a, b) = ants |> chop_prefix (not o is_special_text) ||> tl in
+          if is_finally s
+          then ("Isabelle_Thread.try_finally", [make_expr a, make_expr b])
+          else ("Isabelle_Thread.try_catch", [make_expr a, make_handler (ML_Lex.range_of s) b])
+        end
+    | _ => error ("Too many special keywords: " ^ commas (map print_special specials)))
+  end;
+
+fun parse_can (_: Proof.context) input =
+  ("Isabelle_Thread.can", [make_expr (ML_Lex.read_source input)]);
+
+in
 
 val _ = Theory.setup
- (ML_Antiquotation.special_form \<^binding>\<open>try\<close> "() |> Basics.try" #>
-  ML_Antiquotation.special_form \<^binding>\<open>can\<close> "() |> Basics.can" #>
-  ML_Context.add_antiquotation \<^binding>\<open>if_none\<close> true
-    (fn _ => fn src => fn ctxt =>
+  (ML_Antiquotation.special_form \<^binding>\<open>try\<close> parse_try #>
+   ML_Antiquotation.special_form \<^binding>\<open>can\<close> parse_can);
+
+end;
+
+
+
+(* special form for option type *)
+
+val _ = Theory.setup
+  (ML_Context.add_antiquotation_embedded \<^binding>\<open>if_none\<close>
+    (fn _ => fn input => fn ctxt =>
       let
-        val (s, _) = Token.syntax (Scan.lift Parse.embedded_input) src ctxt;
         val tokenize = ML_Lex.tokenize_no_range;
 
-        val (decl, ctxt') = ML_Context.expand_antiquotes (ML_Lex.read_source s) ctxt;
+        val (decl, ctxt') = ML_Context.read_antiquotes input ctxt;
         fun decl' ctxt'' =
           let
             val (ml_env, ml_body) = decl ctxt'';

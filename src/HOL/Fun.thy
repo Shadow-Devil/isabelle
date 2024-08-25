@@ -395,6 +395,11 @@ lemma bij_comp: "bij f \<Longrightarrow> bij g \<Longrightarrow> bij (g \<circ> 
 lemma bij_betw_comp_iff: "bij_betw f A A' \<Longrightarrow> bij_betw f' A' A'' \<longleftrightarrow> bij_betw (f' \<circ> f) A A''"
   by (auto simp add: bij_betw_def inj_on_def)
 
+lemma bij_betw_Collect:
+  assumes "bij_betw f A B" "\<And>x. x \<in> A \<Longrightarrow> Q (f x) \<longleftrightarrow> P x"
+  shows   "bij_betw f {x\<in>A. P x} {y\<in>B. Q y}"
+  using assms by (auto simp add: bij_betw_def inj_on_def)
+
 lemma bij_betw_comp_iff2:
   assumes bij: "bij_betw f' A' A''"
     and img: "f ` A \<le> A'"
@@ -1024,7 +1029,6 @@ proof (rule monotone_onI)
     using mono_f[THEN monotone_onD] by simp
 qed
 
-
 subsubsection \<open>Specializations For @{class ord} Type Class And More\<close>
 
 context ord begin
@@ -1157,6 +1161,20 @@ proof (rule monoI)
 
   qed
 qed
+
+lemma mono_on_ident: "mono_on S (\<lambda>x. x)"
+  by (simp add: monotone_on_def)
+
+lemma strict_mono_on_ident: "strict_mono_on S (\<lambda>x. x)"
+  by (simp add: monotone_on_def)
+
+lemma mono_on_const:
+  fixes a :: "'b::order" shows "mono_on S (\<lambda>x. a)"
+  by (simp add: mono_on_def)
+
+lemma antimono_on_const:
+  fixes a :: "'b::order" shows "antimono_on S (\<lambda>x. a)"
+  by (simp add: monotone_on_def)
 
 end
 

@@ -7,7 +7,6 @@ Support for TOML: https://toml.io/en/v1.0.0
 package isabelle
 
 
-import TOML.Parsers.Keys
 import TOML.Parse_Context.Seen
 
 import java.lang.Long.parseLong
@@ -21,6 +20,8 @@ import scala.util.Try
 import scala.util.matching.Regex
 import scala.util.parsing.combinator
 import scala.util.parsing.combinator.lexical.Scanners
+import scala.util.parsing.input
+import scala.util.parsing.input.Positional
 import scala.util.parsing.input.CharArrayReader.EofCh
 
 
@@ -39,12 +40,28 @@ object TOML {
   case class Local_Date(rep: LocalDate) extends T
   case class Local_Time(rep: LocalTime) extends T
 
+  object Scalar {
+    def unapply(t: T): Option[Str] =
+      t match {
+        case s: String => Some(s.rep)
+        case i: Integer => Some(i.rep.toString)
+        case f: Float => Some(f.rep.toString)
+        case b: Boolean => Some(b.rep.toString)
+        case o: Offset_Date_Time => Some(o.rep.toString)
+        case l: Local_Date_Time => Some(l.rep.toString)
+        case l: Local_Date => Some(l.rep.toString)
+        case l: Local_Time => Some(l.rep.toString)
+        case _ => None
+      }
+  }
+
   class Array private(private val rep: List[T]) extends T {
     override def hashCode(): Int = rep.hashCode()
     override def equals(that: Any): Bool = that match {
       case other: Array => rep == other.rep
       case _ => false
     }
+    override def toString: Str = "Array(" + length.toString + ")"
 
     class Values[A](pf: PartialFunction[T, A]) { def values: List[A] = rep.collect(pf).reverse }
     lazy val string = new Values({ case s: String => s })
@@ -68,15 +85,22 @@ object TOML {
   object Array {
     def apply(elems: Iterable[T]): Array = new Array(elems.toList.reverse)
     def apply(elems: T*): Array = Array(elems)
+    val empty: Array = apply()
   }
 
-  class Table private(private val rep: Map[Key, T]) extends T {
+  class Table private(private val rep: ListMap[Key, T]) extends T {
     override def hashCode(): Int = rep.hashCode()
     override def equals(that: Any): Bool =
       that match {
         case other: Table => rep == other.rep
         case _ => false
       }
+    override def toString: Str =
+      rep.map {
+        case (k, t: Table) => k + "(" + t.domain.size + ")"
+        case (k, a: Array) => k + "(" + a.length + ")"
+        case (k, _) => k
+      }.mkString("Table(", ", ", ")")
 
     class Value[A: ClassTag](pf: PartialFunction[T, A]) {
       def values: List[(Key, A)] =
@@ -88,9 +112,9 @@ object TOML {
             case Some(value) => value
             case None =>
               error("Expected" + classTag[A].runtimeClass.getName +
-                ", got " + v.getClass.getSimpleName + " for key " + Format.key(k))
+                ", got " + v.getClass.getSimpleName + " for key " + quote(k))
           }
-          case None => error("Key " + Format.key(k) + " does not exist")
+          case None => error("Key " + quote(k) + " does not exist")
         }
     }
 
@@ -114,7 +138,7 @@ object TOML {
           (v0, v) match {
             case (t0: Table, t: Table) => t0 ++ t
             case (a0: Array, a: Array) => a0 ++ a
-            case _ => error("Key already present: " + Format.key(k))
+            case _ => v
           }
       }
       new Table(rep + (k -> v1))
@@ -128,16 +152,15 @@ object TOML {
   object Table {
     def apply(elems: Iterable[(Key, T)]): Table = elems.foldLeft(new Table(ListMap.empty))(_ + _)
     def apply(elems: (Key, T)*): Table = Table(elems)
+    val empty: Table = apply()
   }
 
 
   /* lexer */
 
-  object Kind extends Enumeration {
-    val KEYWORD, VALUE, STRING, MULTILINE_STRING, LINE_SEP, ERROR = Value
-  }
+  enum Kind { case KEYWORD, VALUE, STRING, MULTILINE_STRING, LINE_SEP, ERROR }
 
-  sealed case class Token(kind: Kind.Value, text: Str) {
+  sealed case class Token(kind: Kind, text: Str) extends Positional {
     def is_keyword(name: Str): Bool = kind == Kind.KEYWORD && text == name
     def is_value: Bool = kind == Kind.VALUE
     def is_string: Bool = kind == Kind.STRING
@@ -213,8 +236,8 @@ object TOML {
       elem("", "\"\\".contains(_)) |
         elem("", "btnfr".contains(_)) ^^
           { case 'b' => '\b' case 't' => '\t' case 'n' => '\n' case 'f' => '\f' case 'r' => '\r' } |
-        ('u' ~> repeated(character("0123456789abcdefABCDEF".contains(_)), 4, 4) |
-          'U' ~> repeated(character("0123456789abcdefABCDEF".contains(_)), 8, 8)) ^^
+        ('u' ~> repeated(character(Symbol.is_ascii_hex), 4, 4) |
+          'U' ~> repeated(character(Symbol.is_ascii_hex), 8, 8)) ^^
           (s => java.lang.Integer.parseInt(s, 16).toChar)
 
     private def literal_string_elem: Parser[Elem] = elem("", c => !is_control(c) && c != '\'')
@@ -222,7 +245,8 @@ object TOML {
     def string_failure: Parser[Token] = ("\"" | "'") ~> failure("Unterminated string")
 
     def token: Parser[Token] =
-      line_sep_token | keyword | value | string | string_failure | failure("Unrecognized token")
+      positioned(
+        line_sep_token | keyword | value | string | string_failure | failure("Unrecognized token"))
   }
 
 
@@ -234,14 +258,12 @@ object TOML {
 
     /* parse structure */
 
-    type Keys = List[Key]
-
-    sealed trait V
+    sealed trait V extends Positional
     case class Primitive(t: T) extends V
     case class Array(rep: List[V]) extends V
     case class Inline_Table(elems: List[(Keys, V)]) extends V
 
-    sealed trait Def
+    sealed trait Def extends Positional
     case class Table(key: Keys, elems: List[(Keys, V)]) extends Def
     case class Array_Of_Tables(key: Keys, elems: List[(Keys, V)]) extends Def
 
@@ -250,7 +272,7 @@ object TOML {
 
     /* top-level syntax structure */
 
-    def key: Parser[Keys] = rep1sep(keys, $$$(".")) ^^ (_.flatten)
+    def key: Parser[Keys] = positioned(rep1sep(keys, $$$(".")) ^^ (_.reduce(_ ++ _)))
 
     def string: Parser[String] =
       elem("string", e => e.is_string || e.is_multiline_string) ^^ (s => String(s.text))
@@ -271,20 +293,25 @@ object TOML {
       token("local time", _.is_value, s => Local_Time(LocalTime.parse(s)))
 
     def array: Parser[Array] =
-      $$$("[") ~>! repsep(opt(line_sep) ~> toml_value, opt(line_sep) ~ $$$(",")) <~!
-        opt(line_sep) ~! opt($$$(",")) ~! opt(line_sep) <~! $$$("]") ^^ Array.apply
+      positioned(
+        $$$("[") ~>! repsep(opt(line_sep) ~> toml_value, opt(line_sep) ~ $$$(",")) <~!
+          opt(line_sep) ~! opt($$$(",")) ~! opt(line_sep) <~! $$$("]") ^^ Array.apply)
 
     def inline_table: Parser[Inline_Table] =
-      $$$("{") ~>! repsep(pair, $$$(",")) <~! $$$("}") ^^ Inline_Table.apply
+      positioned(
+        $$$("{") ~>! repsep(pair, $$$(",")) <~! $$$("}") ^^ Inline_Table.apply)
 
     def pair: Parser[(Keys, V)] = (key <~! $$$("=")) ~! toml_value ^^ { case ks ~ v => (ks, v) }
 
-    def table: Parser[Table] = $$$("[") ~> (key <~! $$$("]") ~! line_sep) ~! content ^^
-      { case key ~ content => Table(key, content) }
+    def table: Parser[Table] =
+      positioned(
+        $$$("[") ~> (key <~! $$$("]") ~! line_sep) ~! content ^^
+          { case key ~ content => Table(key, content) })
 
     def array_of_tables: Parser[Array_Of_Tables] =
-      $$$("[") ~ $$$("[") ~>! (key <~! $$$("]") ~! $$$("]") ~! line_sep) ~! content ^^
-        { case key ~ content => Array_Of_Tables(key, content) }
+      positioned(
+        $$$("[") ~ $$$("[") ~>! (key <~! $$$("]") ~! $$$("]") ~! line_sep) ~! content ^^
+          { case key ~ content => Array_Of_Tables(key, content) })
 
     def toml: Parser[File] =
       (opt(line_sep) ~>! content ~! rep(table | array_of_tables)) ^^
@@ -306,7 +333,7 @@ object TOML {
 
     private def is_key(e: Elem): Bool = e.is_value && !e.text.exists("+: ".contains(_))
     private def keys: Parser[Keys] =
-      token("string key", _.is_string, List(_)) | token("key", is_key, _.split('.').toList)
+      token("string key", _.is_string, Keys.quoted) | token("key", is_key, Keys.dotted)
 
     private def sep_surrounded(s: Str): Bool =
       !s.startsWith("_") && !s.endsWith("_") && s.split('_').forall(_.nonEmpty)
@@ -339,42 +366,64 @@ object TOML {
         case "nan" | "+nan" | "-nan" => Double.NaN
       })
 
-    private def toml_value: Parser[V] = (string | float | integer | boolean | offset_date_time |
-      local_date_time | local_date | local_time) ^^ Primitive.apply | array | inline_table
+    private def toml_value: Parser[V] =
+      positioned(
+        (string | float | integer | boolean | offset_date_time |
+          local_date_time | local_date | local_time) ^^ Primitive.apply | array | inline_table)
 
     private def line_sep: Parser[Any] = rep1(elem("line sep", _.is_line_sep))
 
     private def content: Parser[List[(Keys, V)]] =
       rep((key <~! $$$("=")) ~! toml_value <~! line_sep ^^ { case ks ~ v => ks -> v })
-
-
-    /* parse */
-
-    def parse(input: Str): File = {
-      val scanner = new Lexer.Scanner(Scan.char_reader(input + EofCh))
-      val result = phrase(toml)(scanner)
-      result match {
-        case Success(toml, _) => toml
-        case Failure(msg, next) => error("Malformed TOML input at " + next.pos + ": " + msg)
-        case Error(msg, next) => error("Error parsing toml at " + next.pos + ": " + msg)
-      }
-    }
   }
 
   object Parsers extends Parsers
 
 
+  /* Keys for nested tables */
+
+  object Keys {
+    def empty: Keys = new Keys(Nil)
+    def quoted(s: Str): Keys = new Keys(List(s))
+    def dotted(s: Str): Keys = new Keys(s.split('.').toList)
+  }
+
+  class Keys private(private val rep: List[Key]) extends Positional {
+    override def hashCode(): Int = rep.hashCode()
+    override def equals(obj: Any): Bool =
+      obj match {
+        case other: Keys => rep == other.rep
+        case _ => false
+      }
+    override def toString: Str = rep.mkString("Keys(", ".", ")")
+
+    def first: Keys = new Keys(rep.take(1))
+    def last: Keys = new Keys(rep.takeRight(1))
+    def next: Keys = new Keys(rep.drop(1))
+    def parent: Keys = new Keys(rep.dropRight(1))
+
+    def the_key: Key = Library.the_single(rep)
+
+    def length: Int = rep.length
+
+    def ++(other: Keys): Keys = new Keys(rep ::: other.rep)
+
+    def prefixes: Set[Keys] = splits.map(_._1).toSet
+    def splits: List[(Keys, Keys)] = Range.inclusive(0, length).toList.map(split).reverse
+    def split(i: Int): (Keys, Keys) = {
+      val (rep0, rep1) = rep.splitAt(i)
+      (new Keys(rep0), new Keys(rep1))
+    }
+
+    def is_child_of(parent: Keys): Bool = rep.startsWith(parent.rep)
+  }
+
+
   /* checking and translating parse structure into toml */
 
-  private def prefixes(ks: Keys): Set[Keys] =
-    if (ks.isEmpty) Set.empty else Range.inclusive(1, ks.length).toSet.map(ks.take)
-
-  class Parse_Context private(var seen_tables: Map[Keys, Seen]) {
-    private def splits(ks: Keys): List[(Keys, Keys)] =
-      Range.inclusive(0, ks.length).toList.map(n => (ks.dropRight(n), ks.takeRight(n)))
-
+  class Parse_Context private(var seen_tables: Map[Keys, Seen], file: Option[Path] = None) {
     private def recent_array(ks: Keys): (Keys, Seen, Keys) =
-      splits(ks).collectFirst {
+      ks.splits.collectFirst {
         case (ks1, ks2) if seen_tables.contains(ks1) => (ks1, seen_tables(ks1), ks2)
       }.get
 
@@ -382,17 +431,19 @@ object TOML {
       val (to, seen, rest, split) =
         elem match {
           case _: Parsers.Array_Of_Tables =>
-            val (_, seen, rest) = recent_array(ks.dropRight(1))
-            (ks, seen, rest ::: ks.takeRight(1), 0)
+            val (_, seen, rest) = recent_array(ks.parent)
+            (ks, seen, rest ++ ks.last, 0)
           case _ =>
             val (to, seen, rest) = recent_array(ks)
             (to, seen, rest, start - to.length)
         }
-      val (rest0, rest1) = rest.splitAt(split)
-      val implicitly_seen = prefixes(rest1.dropRight(1)).map(rest0 ::: _)
+      val (rest0, rest1) = rest.split(split)
+      val implicitly_seen = rest1.parent.prefixes.map(rest0 ++ _)
 
-      seen.inlines.find(rest.startsWith(_)).foreach(ks =>
-        error("Attempting to update an inline value at " + Format.keys(ks)))
+      def error[A](s: Str): A = this.error(s, elem.pos, Some(ks))
+
+      seen.inlines.find(rest.is_child_of).foreach(ks =>
+        error("Attempting to update an inline value"))
 
       val (inlines, tables) =
         elem match {
@@ -400,54 +451,74 @@ object TOML {
             (seen.inlines, seen.tables ++ implicitly_seen)
           case _: Parsers.Array =>
             if (seen_tables.contains(ks))
-              error("Attempting to append with an inline array at " + Format.keys(ks))
+              error("Attempting to append with an inline array")
             (seen.inlines + rest, seen.tables ++ implicitly_seen)
           case _: Parsers.Inline_Table =>
-            seen.tables.find(_.startsWith(rest)).foreach(ks =>
-              error("Attempting to add with an inline table at " + Format.keys(ks)))
+            seen.tables.find(_.is_child_of(rest)).foreach(ks =>
+              error("Attempting to add with an inline table"))
             (seen.inlines + rest, seen.tables ++ implicitly_seen)
           case _: Parsers.Table =>
             if (seen.tables.contains(rest))
-              error("Attempting to define a table twice at " + Format.keys(ks))
+              error("Attempting to define a table twice")
             (seen.inlines, seen.tables + rest)
           case _: Parsers.Array_Of_Tables => (Set.empty, Set.empty)
         }
 
       seen_tables += to -> Seen(inlines, tables)
     }
+
+    def for_file(file: Path): Parse_Context = new Parse_Context(seen_tables, Some(file))
+
+    def error[A](s: Str, pos: input.Position, key: Option[Keys] = None): A = {
+      val key_msg = if_proper(key, " in table " + key.get)
+      val file_msg = if_proper(file, " in " + file.get)
+      isabelle.error(s + key_msg + " at line " + pos.line + file_msg)
+    }
+
     def check_add_def(ks: Keys, defn: Parsers.Def): Unit = check_add(0, ks, defn)
     def check_add_value(ks0: Keys, ks1: Keys, v: Parsers.V): Unit =
-      check_add(ks0.length - 1, ks0 ::: ks1, v)
+      check_add(ks0.length - 1, ks0 ++ ks1, v)
   }
 
   object Parse_Context {
     case class Seen(inlines: Set[Keys], tables: Set[Keys])
 
-    def empty: Parse_Context = new Parse_Context(Map(Nil -> Seen(Set.empty, Set.empty)))
+    def apply(): Parse_Context =
+      new Parse_Context(Map(Keys.empty -> Seen(Set.empty, Set.empty)))
   }
 
-  def parse(s: Str, context: Parse_Context = Parse_Context.empty): Table = {
-    val file = Parsers.parse(s)
+  def parse(s: Str, context: Parse_Context = Parse_Context()): Table = {
+    val file =
+      Parsers.phrase(Parsers.toml)(new Lexer.Scanner(Scan.char_reader(s + EofCh))) match {
+        case Parsers.Success (toml, _) => toml
+        case Parsers.Error(msg, next) => context.error("Error parsing toml: " + msg, next.pos)
+        case Parsers.Failure (msg, next) =>
+          context.error("Malformed TOML input: " + msg, next.pos)
+      }
 
     def convert(ks0: Keys, ks1: Keys, v: Parsers.V): T = {
       def to_table(ks: Keys, t: T): Table =
-        ks.dropRight(1).foldRight(Table(ks.last -> t))((k, v) => Table(k -> v))
+        if (ks.length == 1) Table(ks.first.the_key -> t)
+        else Table(ks.first.the_key -> to_table(ks.next, t))
+
       def to_toml(v: Parsers.V): (T, Set[Keys]) = v match {
         case Parsers.Primitive(t) => (t, Set.empty)
         case Parsers.Array(rep) => (Array(rep.map(to_toml(_)._1)), Set.empty)
         case Parsers.Inline_Table(elems) =>
           elems.find(e => elems.count(_._1 == e._1) > 1).foreach((ks, _) =>
-            error("Duplicate key " + Format.keys(ks) + " in inline table at " +
-              Format.keys(ks0 ::: ks1)))
+            context.error(
+              "Duplicate " + ks + " in inline table", v.pos, Some(ks0 ++ ks1)))
 
           val (tables, pfxs, key_spaces) =
             elems.map { (ks, v) =>
               val (t, keys) = to_toml(v)
-              (to_table(ks, t), prefixes(ks), keys.map(ks ::: _) + ks)
+              (to_table(ks, t), ks.prefixes, keys.map(ks ++ _) + ks)
             }.unzip3
 
-          pfxs.foreach(pfx => if (key_spaces.count(pfx.intersect(_).nonEmpty) > 1)
-            error("Inline table not self-contained at " + Format.keys(ks0 ::: ks1)))
+          for {
+            pfx <- pfxs
+            if key_spaces.count(pfx.intersect(_).nonEmpty) > 1
+          } context.error("Inline table not self-contained", v.pos, Some(ks0 ++ ks1))
 
           (tables.foldLeft(Table())(_ ++ _), pfxs.toSet.flatten ++ key_spaces.toSet.flatten)
       }
@@ -456,47 +527,48 @@ object TOML {
     }
 
     def update(map: Table, ks0: Keys, value: T): Table = {
+      def error[A](s: Str): A = context.error(s, ks0.pos, Some(ks0))
+
       def update_rec(hd: Keys, map: Table, ks: Keys): Table = {
         val updated =
           if (ks.length == 1) {
-            map.any.get(ks.head) match {
+            map.any.get(ks.first.the_key) match {
               case Some(a: Array) =>
                 value match {
                   case a2: Array => a ++ a2
-                  case _ =>
-                    error("Table conflicts with previous array of tables at " + Format.keys(ks0))
+                  case _ => error("Table conflicts with previous array of tables")
                 }
               case Some(t: Table) => value match {
                 case t2: Table =>
                   if (t.domain.intersect(t2.domain).nonEmpty)
-                    error("Attempting to redefine existing value in super-table at " +
-                      Format.keys(ks0))
+                    error("Attempting to redefine existing value in super-table")
                   else t ++ t2
-                case _ => error("Attempting to redefine a table at " + Format.keys(ks0))
+                case _ => error("Attempting to redefine a table")
               }
-              case Some(_) => error("Attempting to redefine a value at " + Format.keys(ks0))
+              case Some(_) => error("Attempting to redefine a value")
               case None => value
             }
           }
           else {
-            val hd1 = hd :+ ks.head
-            map.any.get(ks.head) match {
-              case Some(t: Table) => update_rec(hd1, t, ks.tail)
+            val hd1 = hd ++ ks.first
+            map.any.get(ks.first.the_key) match {
+              case Some(t: Table) => update_rec(hd1, t, ks.next)
               case Some(a: Array) =>
-                Array(a.table.values.dropRight(1) :+ update_rec(hd1, a.table.values.last, ks.tail))
-              case Some(_) => error("Attempting to redefine a value at " + Format.keys(hd1))
-              case None => update_rec(hd1, Table(), ks.tail)
+                Array(a.table.values.dropRight(1) :+ update_rec(hd1, a.table.values.last, ks.next))
+              case Some(_) => error("Attempting to redefine a value")
+              case None => update_rec(hd1, Table(), ks.next)
             }
           }
-        (map - ks.head) + (ks.head -> updated)
+        (map - ks.first.the_key) + (ks.first.the_key -> updated)
       }
-      update_rec(Nil, map, ks0)
+
+      update_rec(Keys.empty, map, ks0)
     }
 
     def fold(elems: List[(Keys, T)]): Table =
       elems.foldLeft(Table()) { case (t0, (ks1, t1)) => update(t0, ks1, t1) }
 
-    val t = fold(file.elems.map((ks, v) => (ks, convert(Nil, ks, v))))
+    val t = fold(file.elems.map((ks, v) => (ks, convert(Keys.empty, ks, v))))
     file.defs.foldLeft(t) {
       case (t0, defn@Parsers.Table(ks0, elems)) =>
         context.check_add_def(ks0, defn)
@@ -506,6 +578,13 @@ object TOML {
         update(t0, ks0, Array(fold(elems.map((ks, v) => (ks, convert(ks0, ks, v))))))
     }
   }
+
+  def parse_files(files: Iterable[Path], context: Parse_Context = Parse_Context()): Table =
+    files.foldLeft((Table(), context)) {
+      case ((t, context0), file) =>
+        val context = context0.for_file(file)
+        (t ++ parse(File.read(file), context), context)
+    }._1
 
 
   /* Format TOML */
@@ -525,7 +604,7 @@ object TOML {
           if (c <= '\u001f' || c == '\u007f') "\\u%04x".format(c.toInt) else c
       }.mkString.replace("\"\"\"", "\"\"\\\"") + "\"\"\""
 
-    def key(k: Key): Str = {
+    private def key(k: Key): Str = {
       val Bare_Key = """[A-Za-z0-9_-]+""".r
       k match {
         case Bare_Key() => k
@@ -533,24 +612,16 @@ object TOML {
       }
     }
 
-    def keys(ks: Keys): Str = ks.mkString(".")
+    private def keys(ks: List[Key]): Str = ks.map(key).mkString(".")
 
-    def inline(t: T, indent: Int = 0): Str = {
+    private def inline(t: T, indent: Int = 0): Str = {
       val result = new StringBuilder
-      def indentation(i: Int): Unit = for (_ <- Range(0, i)) result ++= "  "
 
-      indentation(indent)
-      t match {
+      result ++= Symbol.spaces(indent * 2)
+      (t: @unchecked) match {
         case s: String =>
           if (s.rep.contains("\n") && s.rep.length > 20) result ++= multiline_basic_string(s.rep)
           else result ++= basic_string(s.rep)
-        case i: Integer => result ++= i.rep.toString
-        case f: Float => result ++= f.rep.toString
-        case b: Boolean => result ++= b.rep.toString
-        case o: Offset_Date_Time => result ++= o.rep.toString
-        case l: Local_Date_Time => result ++= l.rep.toString
-        case l: Local_Date => result ++= l.rep.toString
-        case l: Local_Time => result ++= l.rep.toString
         case a: Array =>
           if (a.is_empty) result ++= "[]"
           else {
@@ -559,7 +630,7 @@ object TOML {
               result ++= inline(elem, indent + 1)
               result ++= ",\n"
             }
-            indentation(indent)
+            result ++= Symbol.spaces(indent * 2)
             result += ']'
           }
         case table: Table =>
@@ -575,6 +646,7 @@ object TOML {
             }
             result ++= " }"
           }
+        case Scalar(s) => result ++= s
       }
       result.toString()
     }

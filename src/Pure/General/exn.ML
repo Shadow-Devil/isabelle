@@ -11,32 +11,45 @@ sig
   val cat_error: string -> string -> 'a
 end;
 
-signature EXN =
+signature EXN0 =
 sig
   include BASIC_EXN
   val polyml_location: exn -> PolyML.location option
   val reraise: exn -> 'a
   datatype 'a result = Res of 'a | Exn of exn
+  val is_res: 'a result -> bool
+  val is_exn: 'a result -> bool
   val get_res: 'a result -> 'a option
   val get_exn: 'a result -> exn option
-  val capture: ('a -> 'b) -> 'a -> 'b result
+  val capture0: ('a -> 'b) -> 'a -> 'b result  (*unmanaged interrupts*)
   val release: 'a result -> 'a
   val map_res: ('a -> 'b) -> 'a result -> 'b result
   val maps_res: ('a -> 'b result) -> 'a result -> 'b result
   val map_exn: (exn -> exn) -> 'a result -> 'a result
-  exception Interrupt
-  val interrupt: unit -> 'a
+  val cause: exn -> exn
+  exception Interrupt_Break
+  exception Interrupt_Breakdown
+  val is_interrupt_raw: exn -> bool
+  val is_interrupt_break: exn -> bool
+  val is_interrupt_breakdown: exn -> bool
+  val is_interrupt_proper: exn -> bool
   val is_interrupt: exn -> bool
-  val interrupt_exn: 'a result
+  val is_interrupt_proper_exn: 'a result -> bool
   val is_interrupt_exn: 'a result -> bool
-  val interruptible_capture: ('a -> 'b) -> 'a -> 'b result
-  val return_code: exn -> int -> int
-  val capture_exit: int -> ('a -> 'b) -> 'a -> 'b
+  val result: ('a -> 'b) -> 'a -> 'b result
+  val failure_rc: exn -> int
   exception EXCEPTIONS of exn list
   val trace: (exn -> string) -> (string -> unit) -> (unit -> 'a) -> 'a
 end;
 
-structure Exn: EXN =
+signature EXN =
+sig
+  include EXN0
+  val capture: ('a -> 'b) -> 'a -> 'b result  (*managed interrupts*)
+  val capture_body: (unit -> 'a) -> 'a result
+end;
+
+structure Exn: EXN0 =
 struct
 
 (* location *)
@@ -63,13 +76,19 @@ datatype 'a result =
   Res of 'a |
   Exn of exn;
 
+fun is_res (Res _) = true
+  | is_res _ = false;
+
+fun is_exn (Exn _) = true
+  | is_exn _ = false;
+
 fun get_res (Res x) = SOME x
   | get_res _ = NONE;
 
 fun get_exn (Exn exn) = SOME exn
   | get_exn _ = NONE;
 
-fun capture f x = Res (f x) handle e => Exn e;
+fun capture0 f x = Res (f x) handle e => Exn e;
 
 fun release (Res y) = y
   | release (Exn e) = reraise e;
@@ -85,30 +104,28 @@ fun map_exn f (Res x) = Res x
 
 (* interrupts *)
 
-exception Interrupt = Thread.Thread.Interrupt;
+fun cause (IO.Io {cause = exn, ...}) = cause exn
+  | cause exn = exn;
 
-fun interrupt () = raise Interrupt;
+exception Interrupt_Break;
+exception Interrupt_Breakdown;
 
-fun is_interrupt Interrupt = true
-  | is_interrupt (IO.Io {cause, ...}) = is_interrupt cause
-  | is_interrupt _ = false;
+fun is_interrupt_raw exn = (case cause exn of Thread.Thread.Interrupt => true | _ => false);
+fun is_interrupt_break exn = (case cause exn of Interrupt_Break => true | _ => false);
+fun is_interrupt_breakdown exn = (case cause exn of Interrupt_Breakdown => true | _ => false);
+fun is_interrupt_proper exn = is_interrupt_raw exn orelse is_interrupt_break exn;
+fun is_interrupt exn = is_interrupt_proper exn orelse is_interrupt_breakdown exn;
 
-val interrupt_exn = Exn Interrupt;
+fun is_interrupt_proper_exn (Exn exn) = is_interrupt_proper exn
+  | is_interrupt_proper_exn _ = false;
 
 fun is_interrupt_exn (Exn exn) = is_interrupt exn
   | is_interrupt_exn _ = false;
 
-fun interruptible_capture f x =
+fun result f x =
   Res (f x) handle e => if is_interrupt e then reraise e else Exn e;
 
-
-(* POSIX return code *)
-
-fun return_code exn rc =
-  if is_interrupt exn then 130 else rc;
-
-fun capture_exit rc f x =
-  f x handle exn => exit (return_code exn rc);
+fun failure_rc exn = if is_interrupt exn then 130 else 2;
 
 
 (* concatenated exceptions *)

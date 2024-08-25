@@ -31,6 +31,9 @@ sig
   val map_facts_refs: ('a list -> 'att list) -> ('b -> 'fact) ->
     (('c * 'a list) * ('b * 'a list) list) list ->
     (('c * 'att list) * ('fact * 'att list) list) list
+  val map_thms: ('a -> 'b) ->
+    ('c * ('a list * 'd) list) list ->
+    ('c * ('b list * 'd) list) list
   val trim_context_binding: Attrib.binding -> Attrib.binding
   val trim_context_thms: thms -> thms
   val trim_context_fact: fact -> fact
@@ -181,10 +184,12 @@ fun attribute_cmd_global thy = attribute_global thy o check_src (Proof_Context.i
 
 (* attributed declarations *)
 
-fun map_specs f = map (apfst (apsnd f));
+fun map_specs f = (map o apfst o apsnd) f;
 
-fun map_facts f = map (apfst (apsnd f) o apsnd (map (apsnd f)));
-fun map_facts_refs f g = map_facts f #> map (apsnd (map (apfst g)));
+fun map_facts f = map (fn (a, b) => (apsnd f a, (map o apsnd) f b));
+fun map_facts_refs f g = map_facts f #> (map o apsnd o map o apfst) g;
+
+fun map_thms f = (map o apsnd o map o apfst o map) f;
 
 
 (* implicit context *)
@@ -201,7 +206,7 @@ fun trim_context_fact (binding, thms) = (trim_context_binding binding, trim_cont
 (* fact expressions *)
 
 fun global_notes kind facts thy = thy |>
-  Global_Theory.note_thmss kind (map_facts (map (attribute_global thy)) facts);
+  Global_Theory.note_thmss_foundation kind (map_facts (map (attribute_global thy)) facts);
 
 fun local_notes kind facts ctxt = ctxt |>
   Proof_Context.note_thmss kind (map_facts (map (attribute ctxt)) facts);
@@ -613,6 +618,7 @@ val _ = Theory.setup
   register_config_string ML_Env.ML_environment #>
   register_config_bool ML_Env.ML_read_global #>
   register_config_bool ML_Env.ML_write_global #>
+  register_config_bool ML_Compiler.ML_catch_all #>
   register_config_bool ML_Options.source_trace #>
   register_config_bool ML_Options.exception_trace #>
   register_config_bool ML_Options.exception_debugger #>
@@ -624,10 +630,11 @@ val _ = Theory.setup
   register_config_bool Thm.show_hyps #>
   register_config_bool Thm.show_tags #>
   register_config_bool Pattern.unify_trace_failure #>
-  register_config_int Unify.trace_bound #>
   register_config_int Unify.search_bound #>
-  register_config_bool Unify.trace_simp #>
-  register_config_bool Unify.trace_types #>
+  register_config_bool Unify.unify_trace #>
+  register_config_int Unify.unify_trace_bound #>
+  register_config_bool Unify.unify_trace_simp #>
+  register_config_bool Unify.unify_trace_types #>
   register_config_int Raw_Simplifier.simp_depth_limit #>
   register_config_int Raw_Simplifier.simp_trace_depth_limit #>
   register_config_bool Raw_Simplifier.simp_debug #>

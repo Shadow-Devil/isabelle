@@ -35,14 +35,14 @@ val _ =
           | ("1", _) => Exn.Res rest
           | ("2", [msg]) => Exn.Exn (ERROR (Bytes.content msg))
           | ("3", [msg]) => Exn.Exn (Fail (Bytes.content msg))
-          | ("4", []) => Exn.Exn Exn.Interrupt
+          | ("4", []) => Isabelle_Thread.interrupt_exn
           | _ => raise Fail "Malformed Scala.result");
       in Synchronized.change results (Symtab.map_entry (Bytes.content id) (K result)) end);
 
 in
 
 fun function_bytes name args =
-  Thread_Attributes.uninterruptible (fn restore_attributes => fn () =>
+  Thread_Attributes.uninterruptible_body (fn run =>
     let
       val id = new_id ();
       fun invoke () =
@@ -57,12 +57,13 @@ fun function_bytes name args =
             (case Symtab.lookup tab id of
               SOME (Exn.Exn Match) => NONE
             | SOME result => SOME (result, Symtab.delete id tab)
-            | NONE => SOME (Exn.Exn Exn.Interrupt, tab)));
+            | NONE => SOME (Isabelle_Thread.interrupt_exn, tab)));
     in
       invoke ();
-      Exn.release (restore_attributes await_result ())
-        handle exn => (if Exn.is_interrupt exn then cancel () else (); Exn.reraise exn)
-    end) ();
+      (case Exn.capture_body (fn () => Exn.release (run await_result ())) of
+        Exn.Res res => res
+      | Exn.Exn exn => (if Exn.is_interrupt exn then cancel () else (); Exn.reraise exn))
+    end);
 
 val function1_bytes = singleton o function_bytes;
 

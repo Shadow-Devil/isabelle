@@ -54,10 +54,7 @@ object Component_SPASS {
       val component_dir =
         Components.Directory(target_dir + Path.basic(component_name)).create(progress = progress)
 
-      val platform_name =
-        proper_string(Isabelle_System.getenv("ISABELLE_PLATFORM64"))
-          .getOrElse(error("No 64bit platform"))
-
+      val platform_name = Isabelle_Platform.self.ISABELLE_PLATFORM()
       val platform_dir =
         Isabelle_System.make_directory(component_dir.path + Path.basic(platform_name))
 
@@ -137,6 +134,7 @@ Viel SPASS!
         """ + Date.Format.date(Date.now()) + "\n")
     }
 }
+
 
   /* Isabelle tool wrapper */
 

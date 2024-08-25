@@ -279,10 +279,9 @@ text \<open>
 
     \<^item> @{system_option_def "threads"} determines the number of worker threads
     for parallel checking of theories and proofs. The default \<open>0\<close> means that a
-    sensible maximum value is determined by the underlying hardware. For
-    machines with many cores or with hyperthreading, this sometimes requires
-    manual adjustment (on the command-line or within personal settings or
-    preferences, not within a session \<^verbatim>\<open>ROOT\<close>).
+    sensible value is guessed from the underlying hardware. This sometimes
+    requires manual adjustment (on the command-line or within personal
+    settings or preferences, not within a session \<^verbatim>\<open>ROOT\<close>).
 
     \<^item> @{system_option_def "condition"} specifies a comma-separated list of
     process environment variables (or Isabelle settings) that are required for
@@ -363,8 +362,8 @@ text \<open>
     -A ROOT      include AFP with given root directory (":" for $AFP_BASE)
     -B NAME      include session NAME and all descendants
     -D DIR       include session directory and select its sessions
-    -H HOSTS     additional build cluster host specifications, of the form
-                 "NAMES:PARAMETERS" (separated by commas)
+    -H HOSTS     additional cluster host specifications of the form
+                 NAMES:PARAMETERS (separated by commas)
     -N           cyclic shuffling of NUMA CPU nodes (performance tuning)
     -P DIR       enable HTML/PDF presentation in directory (":" for default)
     -R           refer to requirements of selected sessions
@@ -377,7 +376,8 @@ text \<open>
     -e           export files from session specification into file-system
     -f           fresh build
     -g NAME      select session group NAME
-    -j INT       maximum number of parallel jobs (default 1)
+    -j INT       maximum number of parallel jobs
+                 (default: 1 for local build, 0 for build cluster)
     -k KEYWORD   check theory sources for conflicts with proposed keywords
     -l           list session source files
     -n           no build -- take existing session build databases
@@ -387,7 +387,7 @@ text \<open>
 
   Build and manage Isabelle sessions: ML heaps, session databases, documents.
 
-  Parameters for host specifications (option -H), apart from system options:
+  Parameters for cluster host specifications (-H), apart from system options:
      ...
 
   Notable system options: see "isabelle options -l -t build"
@@ -451,12 +451,11 @@ text \<open>
   The build process depends on additional options
   (\secref{sec:system-options}) that are passed to the prover eventually. The
   settings variable @{setting_ref ISABELLE_BUILD_OPTIONS} allows to provide
-  additional defaults, e.g.\ \<^verbatim>\<open>ISABELLE_BUILD_OPTIONS="document=pdf
-  threads=4"\<close>. Moreover, the environment of system build options may be
-  augmented on the command line via \<^verbatim>\<open>-o\<close>~\<open>name\<close>\<^verbatim>\<open>=\<close>\<open>value\<close> or \<^verbatim>\<open>-o\<close>~\<open>name\<close>,
-  which abbreviates \<^verbatim>\<open>-o\<close>~\<open>name\<close>\<^verbatim>\<open>=true\<close> for Boolean or string options.
-  Multiple occurrences of \<^verbatim>\<open>-o\<close> on the command-line are applied in the given
-  order.
+  additional defaults, e.g.\ \<^verbatim>\<open>ISABELLE_BUILD_OPTIONS="document=pdf threads=4"\<close>.
+  Moreover, the environment of system build options may be augmented on the
+  command line via \<^verbatim>\<open>-o\<close>~\<open>name\<close>\<^verbatim>\<open>=\<close>\<open>value\<close> or \<^verbatim>\<open>-o\<close>~\<open>name\<close>, which abbreviates
+  \<^verbatim>\<open>-o\<close>~\<open>name\<close>\<^verbatim>\<open>=true\<close> for Boolean or string options. Multiple occurrences of
+  \<^verbatim>\<open>-o\<close> on the command-line are applied in the given order.
 
   \<^medskip>
   Option \<^verbatim>\<open>-P\<close> enables PDF/HTML presentation in the given directory, where
@@ -495,7 +494,8 @@ text \<open>
   \<^medskip>
   Option \<^verbatim>\<open>-j\<close> specifies the maximum number of parallel build jobs (prover
   processes). Each prover process is subject to a separate limit of parallel
-  worker threads, cf.\ system option @{system_option_ref threads}.
+  worker threads, cf.\ system option @{system_option_ref threads}. The default
+  is 1 for a local build, and 0 for a cluster build (see option \<^verbatim>\<open>-H\<close> below).
 
   \<^medskip>
   Option \<^verbatim>\<open>-N\<close> enables cyclic shuffling of NUMA CPU nodes. This may help
@@ -515,14 +515,27 @@ text \<open>
 
   \<^medskip>
   Option \<^verbatim>\<open>-H\<close> augments the cluster hosts to be used in this build process.
-  Each \<^verbatim>\<open>-H\<close> option accepts multiple host names (separated by commas), which
-  all share the same (optional) parameters. Multiple \<^verbatim>\<open>-H\<close> options may be
-  given to specify further hosts (with different parameters). For example:
-  \<^verbatim>\<open>-H host1,host2:jobs=2,threads=4 -H host3:jobs=4,threads=6\<close>.
+  Each \<^verbatim>\<open>-H\<close> option accepts multiple host or cluster names (separated by
+  commas), which all share the same (optional) parameters or system options.
+  Multiple \<^verbatim>\<open>-H\<close> options may be given to specify further hosts (with different
+  parameters). For example: \<^verbatim>\<open>-H host1,host2:jobs=2,threads=4 -H host3:jobs=4,threads=6\<close>.
 
   The syntax for host parameters follows Isabelle outer syntax, notably with
   double-quoted string literals. On the command-line, this may require extra
   single quotes or escapes. For example: \<^verbatim>\<open>-H 'host4:dirs="..."'\<close>.
+
+  The system registry (\secref{sec:system-registry}) may define host and
+  cluster names in its tables \<^verbatim>\<open>host\<close> and \<^verbatim>\<open>cluster\<close>, respectively. A name in
+  option \<^verbatim>\<open>-H\<close> without prefix refers to the registry table \<^verbatim>\<open>host\<close>: each entry
+  consists of an optional \<^verbatim>\<open>hostname\<close> and further options. A name with the
+  prefix ``\<^verbatim>\<open>cluster.\<close>'' refers to the table \<^verbatim>\<open>cluster\<close>: each entry provides
+  \<^verbatim>\<open>hosts\<close>, an array of names for entries of the table \<^verbatim>\<open>host\<close> as above, and
+  additional options that apply to all hosts simultaneously.
+
+  The local host only participates in cluster build, if an explicit option
+  \<^verbatim>\<open>-j\<close> > 0 is given. The default is 0, which means that \<^verbatim>\<open>isabelle build -H\<close>
+  will initialize the build queue and oversee remote workers, but not run any
+  Isabelle sessions on its own account.
 
   The presence of at least one \<^verbatim>\<open>-H\<close> option changes the mode of operation of
   \<^verbatim>\<open>isabelle build\<close> substantially. It uses a shared PostgreSQL database
@@ -596,6 +609,21 @@ text \<open>
   @{verbatim [display] \<open>  isabelle build -a -j2 -o threads=8 \
     -H host1:jobs=2,threads=8
     -H host2:jobs=4:threads=4,numa,shared\<close>}
+
+  \<^smallskip>
+  Use build hosts and cluster specifications:
+  @{verbatim [display] \<open>  isabelle build -H a -H b -H cluster.xy\<close>}
+
+  The above requires a \<^path>\<open>$ISABELLE_HOME_USER/etc/registry.toml\<close> file like
+  this:
+
+@{verbatim [display] \<open>    host.a = { hostname = "host-a.acme.org", jobs = 2 }
+    host.b = { hostname = "host-b.acme.org", jobs = 2 }
+
+    host.x = { hostname = "server1.example.com" }
+    host.y = { hostname = "server2.example.com" }
+    cluster.xy = { hosts = ["x", "y"], jobs = 4 }
+\<close>}
 \<close>
 
 
@@ -656,7 +684,7 @@ text \<open>
   turned into plain spaces (according to their formal width).
 
   The syntax for patters follows regular expressions of the Java
-  platform.\<^footnote>\<open>\<^url>\<open>https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/regex/Pattern.html\<close>\<close>
+  platform.\<^footnote>\<open>\<^url>\<open>https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/regex/Pattern.html\<close>\<close>
 \<close>
 
 subsubsection \<open>Examples\<close>

@@ -92,7 +92,7 @@ object Headless {
       def finished: Load_State = Load_State(Nil, Nil, Space.zero)
 
       def count_file(name: Document.Node.Name): Long =
-        if (loaded_theory(name)) 0 else File.space(name.path).bytes
+        if (loaded_theory(name)) 0 else File.size(name.path)
     }
 
     private case class Load_State(
@@ -448,7 +448,7 @@ object Headless {
     def apply(
       options: Options,
       session_background: Sessions.Background,
-      log: Logger = No_Logger
+      log: Logger = new Logger
     ): Resources = new Resources(options, session_background, log = log)
 
     def make(
@@ -457,7 +457,7 @@ object Headless {
       session_dirs: List[Path] = Nil,
       include_sessions: List[String] = Nil,
       progress: Progress = new Progress,
-      log: Logger = No_Logger
+      log: Logger = new Logger
     ): Resources = {
       val session_background =
         Sessions.background(options, session_name, dirs = session_dirs,
@@ -605,7 +605,7 @@ object Headless {
   class Resources private[Headless](
     val options: Options,
     session_background: Sessions.Background,
-    log: Logger = No_Logger)
+    log: Logger = new Logger)
   extends isabelle.Resources(session_background.check_errors, log = log) {
     resources =>
 

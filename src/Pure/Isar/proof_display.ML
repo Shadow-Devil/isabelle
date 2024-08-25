@@ -12,6 +12,7 @@ sig
   val pp_term: (unit -> theory) -> term -> Pretty.T
   val pp_ctyp: (unit -> theory) -> ctyp -> Pretty.T
   val pp_cterm: (unit -> theory) -> cterm -> Pretty.T
+  val pp_ztyp: (unit -> theory) -> ztyp -> Pretty.T
   val pretty_theory: bool -> Proof.context -> Pretty.T
   val pretty_definitions: bool -> Proof.context -> Pretty.T
   val pretty_theorems_diff: bool -> theory list -> Proof.context -> Pretty.T list
@@ -45,12 +46,17 @@ fun pp_context ctxt =
   else Pretty.str "<context>");
 
 fun default_context mk_thy =
-  (case Context.get_generic_context () of
-    SOME (Context.Proof ctxt) => ctxt
-  | SOME (Context.Theory thy) =>
-      try Syntax.init_pretty_global thy
-      |> \<^if_none>\<open>Syntax.init_pretty_global (mk_thy ())\<close>
-  | NONE => Syntax.init_pretty_global (mk_thy ()));
+  let
+    fun global_context () =
+      Config.put_global Name_Space.names_long true (mk_thy ());
+  in
+    (case Context.get_generic_context () of
+      SOME (Context.Proof ctxt) => ctxt
+    | SOME (Context.Theory thy) =>
+        try Syntax.init_pretty_global thy
+        |> \<^if_none>\<open>Syntax.init_pretty_global (global_context ())\<close>
+    | NONE => Syntax.init_pretty_global (global_context ()))
+  end;
 
 fun pp_thm mk_thy th =
   Thm.pretty_thm_raw (default_context mk_thy) {quote = true, show_hyps = false} th;
@@ -60,6 +66,8 @@ fun pp_term mk_thy t = Pretty.quote (Syntax.pretty_term (default_context mk_thy)
 
 fun pp_ctyp mk_thy cT = pp_typ mk_thy (Thm.typ_of cT);
 fun pp_cterm mk_thy ct = pp_term mk_thy (Thm.term_of ct);
+
+fun pp_ztyp mk_thy T = Pretty.quote (Syntax.pretty_typ (default_context mk_thy) (ZTerm.typ_of T));
 
 
 
@@ -86,7 +94,7 @@ fun pretty_theory verbose ctxt =
       [Pretty.str "default sort:", Pretty.brk 1, prt_sort S];
 
     val tfrees = map (fn v => TFree (v, []));
-    fun pretty_type syn (t, Type.LogicalType n) =
+    fun pretty_type syn (t, Type.Logical_Type n) =
           if syn then NONE
           else SOME (prt_typ (Type (t, tfrees (Name.invent Name.context Name.aT n))))
       | pretty_type syn (t, Type.Abbreviation (vs, U, syn')) =
@@ -272,7 +280,9 @@ fun pretty_goal_inst ctxt propss goal =
           fun inst v =
             let
               val t = Var v;
-              val t' = Envir.subst_term (tyenv, tenv) (Envir.subst_term_types tyenv t);
+              val t' =
+                Envir.subst_term (tyenv, tenv) t handle TYPE _ =>
+                  Envir.subst_term (tyenv, tenv) (Envir.subst_term_types tyenv t);
             in if t aconv t' then NONE else SOME (prt_term t, prt_term t') end;
 
           fun inst_pair (x, y) = Pretty.item [x, Pretty.str " \<leadsto>", Pretty.brk 1, y];

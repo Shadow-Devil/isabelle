@@ -25,10 +25,6 @@ proof (rule equivpI)
   show "transp intrel" by (auto simp: transp_def)
 qed
 
-lemma eq_Abs_Integ [case_names Abs_Integ, cases type: int]:
-  "(\<And>x y. z = Abs_Integ (x, y) \<Longrightarrow> P) \<Longrightarrow> P"
-  by (induct z) auto
-
 
 subsection \<open>Integers form a commutative ring\<close>
 
@@ -180,6 +176,31 @@ proof
 qed
 
 end
+
+instance int :: discrete_linordered_semidom
+proof
+  fix k l :: int
+  show \<open>k < l \<longleftrightarrow> k + 1 \<le> l\<close> (is \<open>?P \<longleftrightarrow> ?Q\<close>)
+  proof
+    assume ?Q
+    then show ?P
+      by simp
+  next
+    assume ?P
+    then have \<open>l - k > 0\<close>
+      by simp
+    with zero_less_imp_eq_int obtain n where \<open>l - k = int n\<close>
+      by blast
+    then have \<open>n > 0\<close>
+      using \<open>l - k > 0\<close> by simp
+    then have \<open>n \<ge> 1\<close>
+      by simp
+    then have \<open>int n \<ge> int 1\<close>
+      by (rule of_nat_mono)
+    with \<open>l - k = int n\<close> show ?Q
+      by simp
+  qed
+qed
 
 lemma zless_imp_add1_zle: "w < z \<Longrightarrow> w + 1 \<le> z"
   for w z :: int
@@ -1487,6 +1508,9 @@ proof
     using pos_zmult_eq_1_iff_lemma [OF L] L by force
 qed auto
 
+lemma zmult_eq_neg1_iff: "a * b = (-1 :: int) \<longleftrightarrow> a = 1 \<and> b = -1 \<or> a = -1 \<and> b = 1"
+  using zmult_eq_1_iff[of a "-b"] by auto
+
 lemma infinite_UNIV_int [simp]: "\<not> finite (UNIV::int set)"
 proof
   assume "finite (UNIV::int set)"
@@ -1734,6 +1758,12 @@ lemma power_int_of_nat [simp]: "power_int x (int n) = x ^ n"
 
 lemma power_int_numeral [simp]: "power_int x (numeral n) = x ^ numeral n"
   by (simp add: power_int_def)
+
+lemma powi_numeral_reduce: "x powi numeral n = x * x powi int (pred_numeral n)"
+  by (simp add: numeral_eq_Suc)
+
+lemma powi_minus_numeral_reduce: "x powi - (numeral n) = inverse x * x powi - int(pred_numeral n)"
+  by (simp add: numeral_eq_Suc power_int_def)
 
 lemma int_cases4 [case_names nonneg neg]:
   fixes m :: int

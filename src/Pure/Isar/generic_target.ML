@@ -296,77 +296,84 @@ fun define foundation internal ((b, mx), ((b_def, atts), rhs)) lthy =
 
 local
 
-fun import_export_proof ctxt (name, raw_th) =
+val name_thm1 = Global_Theory.name_thm Global_Theory.official1 o Thm_Name.short;
+val name_thm2 = Global_Theory.name_thm Global_Theory.unofficial2 o Thm_Name.short;
+
+fun thm_def (name, pos) thm lthy =
+  if #1 name <> "" andalso Proofterm.zproof_enabled (Proofterm.get_proofs_level ()) then
+    Local_Theory.background_theory_result (Thm.store_zproof (name, pos) thm) lthy
+  else (thm, lthy);
+
+fun thm_definition (name_pos, thm) lthy =
   let
-    val thy_ctxt = Proof_Context.init_global (Proof_Context.theory_of ctxt);
+    val thy_ctxt = Proof_Context.init_global (Proof_Context.theory_of lthy);
 
     (*export assumes/defines*)
-    val th = Goal.norm_result ctxt raw_th;
-    val ((defs, asms), th') = Local_Defs.export ctxt thy_ctxt th;
-    val asms' = map (rewrite_rule ctxt (Drule.norm_hhf_eqs @ defs)) asms;
+    val ((defs, asms), thm') = Local_Defs.export lthy thy_ctxt thm;
+    val asms' = map (rewrite_rule lthy (Drule.norm_hhf_eqs @ defs)) asms;
 
     (*export fixes*)
     val tfrees =
-      TFrees.build (Thm.fold_terms {hyps = true} TFrees.add_tfrees th')
+      TFrees.build (Thm.fold_terms {hyps = true} TFrees.add_tfrees thm')
       |> TFrees.keys |> map TFree;
     val frees =
-      Frees.build (Thm.fold_terms {hyps = true} Frees.add_frees th')
+      Frees.build (Thm.fold_terms {hyps = true} Frees.add_frees thm')
       |> Frees.list_set_rev |> map Free;
-    val (th'' :: vs) =
-      (th' :: map (Drule.mk_term o Thm.cterm_of ctxt) (map Logic.mk_type tfrees @ frees))
-      |> Variable.export ctxt thy_ctxt
+    val (schematic_thm :: variables) =
+      (thm' :: map (Drule.mk_term o Thm.cterm_of lthy) (map Logic.mk_type tfrees @ frees))
+      |> Variable.export lthy thy_ctxt
       |> Drule.zero_var_indexes_list;
 
     (*thm definition*)
-    val result = Global_Theory.name_thm Global_Theory.official1 name th'';
+    val (global_thm, lthy') = thm_def name_pos (name_thm1 name_pos schematic_thm) lthy;
 
     (*import fixes*)
     val (tvars, vars) =
-      chop (length tfrees) (map (Thm.term_of o Drule.dest_term) vs)
+      chop (length tfrees) (map (Thm.term_of o Drule.dest_term) variables)
       |>> map Logic.dest_type;
 
     val instT =
       TVars.build (fold2 (fn a => fn b =>
         (case a of TVar v => TVars.add (v, b) | _ => I)) tvars tfrees);
-    val cinstT = TVars.map (K (Thm.ctyp_of ctxt)) instT;
+    val cinstT = TVars.map (K (Thm.ctyp_of lthy')) instT;
     val cinst =
       Vars.build
         (fold2 (fn v => fn t =>
           (case v of
             Var (xi, T) =>
               Vars.add ((xi, Term_Subst.instantiateT instT T),
-                Thm.cterm_of ctxt (Term.map_types (Term_Subst.instantiateT instT) t))
+                Thm.cterm_of lthy' (Term.map_types (Term_Subst.instantiateT_same instT) t))
           | _ => I)) vars frees);
-    val result' = Thm.instantiate (cinstT, cinst) result;
+    val fixed_thm = Thm.instantiate (cinstT, cinst) global_thm;
 
     (*import assumes/defines*)
-    val result'' =
-      (fold (curry op COMP) asms' result'
-        handle THM _ => raise THM ("Failed to re-import result", 0, result' :: asms'))
-      |> Local_Defs.contract ctxt defs (Thm.cprop_of th)
-      |> Goal.norm_result ctxt
-      |> Global_Theory.name_thm Global_Theory.unofficial2 name;
+    val local_thm =
+      (fold (curry op COMP) asms' fixed_thm
+        handle THM _ => raise THM ("Failed to re-import result", 0, fixed_thm :: asms'))
+      |> Local_Defs.contract lthy defs (Thm.cprop_of thm)
+      |> Goal.norm_result lthy
+      |> name_thm2 name_pos;
 
-  in (result'', result) end;
-
-fun bind_name lthy b =
-  (Local_Theory.full_name lthy b, Binding.default_pos_of b);
-
-fun map_facts f = map (apsnd (map (apfst (map f))));
+  in ((local_thm, global_thm), lthy') end;
 
 in
 
-fun notes target_notes kind facts lthy =
+fun notes target_notes kind facts0 lthy =
   let
-    val facts' = facts
-      |> map (fn (a, bs) =>
-          (a, Global_Theory.burrow_fact (Global_Theory.name_multi (bind_name lthy (fst a))) bs))
-      |> map_facts (import_export_proof lthy);
-    val local_facts = map_facts #1 facts';
-    val global_facts = map_facts #2 facts';
+    val facts = Attrib.map_thms (Goal.norm_result lthy) facts0;
+    val (facts', lthy') =
+      (facts, lthy) |-> fold_map (fn (a, thms) => fn lthy1 =>
+        let
+          val thms1 = Thm_Name.expr (Local_Theory.full_name_pos lthy1 (fst a)) thms;
+          val (thms2, lthy2) =
+            (thms1, lthy1) |-> fold_map (fn (args, atts) =>
+              fold_map thm_definition args #>> rpair atts);
+        in ((a, thms2), lthy2) end);
+    val local_facts = Attrib.map_thms #1 facts';
+    val global_facts = Attrib.map_thms #2 facts';
   in
-    lthy
-    |> target_notes kind global_facts (Attrib.partial_evaluation lthy local_facts)
+    lthy'
+    |> target_notes kind global_facts (Attrib.partial_evaluation lthy' local_facts)
     |> Attrib.local_notes kind local_facts
   end;
 

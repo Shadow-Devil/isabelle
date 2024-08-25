@@ -71,18 +71,19 @@ text \<open>
   \<^medskip>
   Option \<^verbatim>\<open>-B\<close> specifies the Docker image taken as starting point for the
   Isabelle installation: it needs to be a suitable version of Ubuntu Linux,
-  see also \<^url>\<open>https://hub.docker.com/_/ubuntu\<close>. The default for Isabelle2022
-  is \<^verbatim>\<open>ubuntu:22.04\<close>, but other versions often work as well, after some
-  experimentation with packages.
+  see also \<^url>\<open>https://hub.docker.com/_/ubuntu\<close>. The default for Isabelle2024
+  is \<^verbatim>\<open>ubuntu:22.04\<close>, but \<^verbatim>\<open>ubuntu:20.04\<close> and \<^verbatim>\<open>ubuntu:24.04\<close> should work as
+  well. Other versions might require experimentation with the package
+  selection.
 
   Option \<^verbatim>\<open>-p\<close> includes additional Ubuntu packages, using the terminology
   of \<^verbatim>\<open>apt-get install\<close> within the underlying Linux distribution.
 
   Option \<^verbatim>\<open>-P\<close> refers to high-level package collections: \<^verbatim>\<open>X11\<close> or \<^verbatim>\<open>latex\<close> as
-  provided by \<^verbatim>\<open>isabelle docker_build\<close> (assuming Ubuntu 20.04 LTS). This
-  imposes extra weight on the resulting Docker images. Note that \<^verbatim>\<open>X11\<close> will
-  only provide remote X11 support according to the modest GUI quality
-  standards of the late 1990-ies.
+  provided by \<^verbatim>\<open>isabelle docker_build\<close> (assuming Ubuntu 20.04/22.04/24.04
+  LTS). This imposes extra weight on the resulting Docker images. Note that
+  \<^verbatim>\<open>X11\<close> will only provide remote X11 support according to the modest GUI
+  quality standards of the late 1990-ies.
 
   \<^medskip>
   Option \<^verbatim>\<open>-n\<close> suppresses the actual \<^verbatim>\<open>docker build\<close> process. Option \<^verbatim>\<open>-o\<close>
@@ -106,22 +107,22 @@ text \<open>
   Produce a Dockerfile (without image) from a remote Isabelle distribution:
   @{verbatim [display]
 \<open>  isabelle docker_build -E -n -o Dockerfile
-    https://isabelle.in.tum.de/website-Isabelle2022/dist/Isabelle2022_linux.tar.gz\<close>}
+    https://isabelle.in.tum.de/website-Isabelle2024/dist/Isabelle2024_linux.tar.gz\<close>}
 
   Build a standard Isabelle Docker image from a local Isabelle distribution,
   with \<^verbatim>\<open>bin/isabelle\<close> as executable entry point:
 
   @{verbatim [display]
-\<open>  isabelle docker_build -E -t test/isabelle:Isabelle2022 Isabelle2022_linux.tar.gz\<close>}
+\<open>  isabelle docker_build -E -t test/isabelle:Isabelle2024 Isabelle2024_linux.tar.gz\<close>}
 
   Invoke the raw Isabelle/ML process within that image:
   @{verbatim [display]
-\<open>  docker run test/isabelle:Isabelle2022 process -e "Session.welcome ()"\<close>}
+\<open>  docker run test/isabelle:Isabelle2024 process -e "Session.welcome ()"\<close>}
 
   Invoke a Linux command-line tool within the contained Isabelle system
   environment:
   @{verbatim [display]
-\<open>  docker run test/isabelle:Isabelle2022 env uname -a\<close>}
+\<open>  docker run test/isabelle:Isabelle2024 env uname -a\<close>}
   The latter should always report a Linux operating system, even when running
   on Windows or macOS.
 \<close>
@@ -399,7 +400,7 @@ text \<open>
   determined by @{setting ISABELLE_HOME}.
 
   The \<open>BINDIR\<close> argument tells where executable wrapper scripts for
-  @{executable "isabelle"} and @{executable isabelle_scala_script} should be
+  @{executable "isabelle"} and @{executable isabelle_java} should be
   placed, which is typically a directory in the shell's @{setting PATH}, such
   as \<^verbatim>\<open>$HOME/bin\<close>.
 
@@ -453,8 +454,8 @@ text \<open>
   Display Isabelle version information.\<close>}
 
   \<^medskip>
-  The default is to output the full version string of the Isabelle
-  distribution, e.g.\ ``\<^verbatim>\<open>Isabelle2022: October 2022\<close>.
+  The default is to output the Isabelle distribution name, e.g.\
+  ``\<^verbatim>\<open>Isabelle2024\<close>''.
 
   \<^medskip>
   Option \<^verbatim>\<open>-i\<close> produces a short identification derived from the Mercurial id
@@ -464,6 +465,32 @@ text \<open>
   These options require either a repository clone or a repository archive
   (e.g. download of
   \<^url>\<open>https://isabelle.sketis.net/repos/isabelle/archive/tip.tar.gz\<close>).
+\<close>
+
+
+section \<open>Managed installations of \<^text>\<open>Haskell\<close> and \<^text>\<open>OCaml\<close>\<close>
+
+text \<open>
+  Code generated in Isabelle \<^cite>\<open>"Haftmann-codegen"\<close> for \<^text>\<open>SML\<close>
+  or \<^text>\<open>Scala\<close> integrates easily using Isabelle/ML or Isabelle/Scala
+  respectively.
+
+  To facilitate integration with further target languages, there are
+  tools to provide managed installations of the required ecosystems:
+
+  \<^item> Tool @{tool_def ghc_setup} provides a basic \<^text>\<open>Haskell\<close> \<^cite>\<open>"Thompson-Haskell"\<close> environment
+    consisting of the Glasgow Haskell Compiler and the Haskell Tool Stack.
+
+  \<^item> Tool @{tool_def ghc_stack} provides an interface to that \<^text>\<open>Haskell\<close>
+    environment; use \<^verbatim>\<open>isabelle ghc_stack --help\<close> for elementary
+    instructions.
+
+  \<^item> Tool @{tool_def ocaml_setup} provides a basic \<^text>\<open>OCaml\<close> \<^cite>\<open>OCaml\<close> environment
+    consisting of the OCaml compiler and the OCaml Package Manager.
+
+  \<^item> Tool @{tool_def ocaml_opam} provides an interface to that \<^text>\<open>OCaml\<close>
+    environment; use \<^verbatim>\<open>isabelle ocaml_opam --help\<close> for elementary
+    instructions.
 \<close>
 
 end

@@ -626,7 +626,7 @@ subsection \<open>Bit-wise operations\<close>
 
 text \<open>
   The following specification of word division just lifts the pre-existing
-  division on integers named ``F-Division'' in \cite{leijen01}.
+  division on integers named ``F-Division'' in \<^cite>\<open>"leijen01"\<close>.
 \<close>
 
 instantiation word :: (len) semiring_modulo
@@ -667,17 +667,35 @@ qed
 
 end
 
-instance word :: (len) semiring_parity
-proof
-  show "\<not> 2 dvd (1::'a word)"
-    by transfer simp
-  show even_iff_mod_2_eq_0: "2 dvd a \<longleftrightarrow> a mod 2 = 0"
-    for a :: "'a word"
-    by transfer (simp_all add: mod_2_eq_odd take_bit_Suc)
-  show "\<not> 2 dvd a \<longleftrightarrow> a mod 2 = 1"
-    for a :: "'a word"
-    by transfer (simp_all add: mod_2_eq_odd take_bit_Suc)
+lemma unat_div_distrib:
+  \<open>unat (v div w) = unat v div unat w\<close>
+proof transfer
+  fix k l
+  have \<open>nat (take_bit LENGTH('a) k) div nat (take_bit LENGTH('a) l) \<le> nat (take_bit LENGTH('a) k)\<close>
+    by (rule div_le_dividend)
+  also have \<open>nat (take_bit LENGTH('a) k) < 2 ^ LENGTH('a)\<close>
+    by (simp add: nat_less_iff)
+  finally show \<open>(nat \<circ> take_bit LENGTH('a)) (take_bit LENGTH('a) k div take_bit LENGTH('a) l) =
+    (nat \<circ> take_bit LENGTH('a)) k div (nat \<circ> take_bit LENGTH('a)) l\<close>
+    by (simp add: nat_take_bit_eq div_int_pos_iff nat_div_distrib take_bit_nat_eq_self_iff)
 qed
+
+lemma unat_mod_distrib:
+  \<open>unat (v mod w) = unat v mod unat w\<close>
+proof transfer
+  fix k l
+  have \<open>nat (take_bit LENGTH('a) k) mod nat (take_bit LENGTH('a) l) \<le> nat (take_bit LENGTH('a) k)\<close>
+    by (rule mod_less_eq_dividend)
+  also have \<open>nat (take_bit LENGTH('a) k) < 2 ^ LENGTH('a)\<close>
+    by (simp add: nat_less_iff)
+  finally show \<open>(nat \<circ> take_bit LENGTH('a)) (take_bit LENGTH('a) k mod take_bit LENGTH('a) l) =
+    (nat \<circ> take_bit LENGTH('a)) k mod (nat \<circ> take_bit LENGTH('a)) l\<close>
+    by (simp add: nat_take_bit_eq mod_int_pos_iff less_le nat_mod_distrib take_bit_nat_eq_self_iff)
+qed
+
+instance word :: (len) semiring_parity
+  by (standard; transfer)
+    (auto simp add: mod_2_eq_odd take_bit_Suc elim: evenE dest: le_Suc_ex)
 
 lemma word_bit_induct [case_names zero even odd]:
   \<open>P a\<close> if word_zero: \<open>P 0\<close>
@@ -837,60 +855,29 @@ instance proof
   qed
   show \<open>bit a n \<longleftrightarrow> odd (a div 2 ^ n)\<close> for a :: \<open>'a word\<close> and n
     by transfer (simp flip: drop_bit_eq_div add: drop_bit_take_bit bit_iff_odd_drop_bit)
-  show \<open>0 div a = 0\<close>
+  show \<open>a div 0 = 0\<close>
     for a :: \<open>'a word\<close>
     by transfer simp
   show \<open>a div 1 = a\<close>
     for a :: \<open>'a word\<close>
     by transfer simp
+  show \<open>0 div a = 0\<close>
+    for a :: \<open>'a word\<close>
+    by transfer simp
   show \<open>a mod b div b = 0\<close>
     for a b :: \<open>'a word\<close>
+    by (simp add: word_eq_iff_unsigned [where ?'a = nat] unat_div_distrib unat_mod_distrib)
+  show \<open>a div 2 div 2 ^ n = a div 2 ^ Suc n\<close>
+    for a :: \<open>'a word\<close> and m n :: nat
     apply transfer
-    apply (simp add: take_bit_eq_mod)
-    apply (smt (verit, best) Euclidean_Rings.pos_mod_bound Euclidean_Rings.pos_mod_sign div_int_pos_iff
-        nonneg1_imp_zdiv_pos_iff zero_less_power zmod_le_nonneg_dividend)
-    done
-  show \<open>(1 + a) div 2 = a div 2\<close>
-    if \<open>even a\<close>
-    for a :: \<open>'a word\<close>
-    using that by transfer
-      (auto dest: le_Suc_ex simp add: take_bit_Suc elim!: evenE)
-  show \<open>(2 :: 'a word) ^ m div 2 ^ n = of_bool ((2 :: 'a word) ^ m \<noteq> 0 \<and> n \<le> m) * 2 ^ (m - n)\<close>
-    for m n :: nat
-    by transfer (simp, simp add: exp_div_exp_eq)
-  show "a div 2 ^ m div 2 ^ n = a div 2 ^ (m + n)"
-    for a :: "'a word" and m n :: nat
-    apply transfer
-    apply (auto simp add: not_less take_bit_drop_bit ac_simps simp flip: drop_bit_eq_div)
+    using drop_bit_eq_div [symmetric, where ?'a = int,of _ 1]
+    apply (auto simp add: not_less take_bit_drop_bit ac_simps simp flip: drop_bit_eq_div simp del: power.simps)
     apply (simp add: drop_bit_take_bit)
     done
-  show "a mod 2 ^ m mod 2 ^ n = a mod 2 ^ min m n"
-    for a :: "'a word" and m n :: nat
-    by transfer (auto simp flip: take_bit_eq_mod simp add: ac_simps)
-  show \<open>a * 2 ^ m mod 2 ^ n = a mod 2 ^ (n - m) * 2 ^ m\<close>
-    if \<open>m \<le> n\<close> for a :: "'a word" and m n :: nat
-    using that apply transfer
-    apply (auto simp flip: take_bit_eq_mod)
-           apply (auto simp flip: push_bit_eq_mult simp add: push_bit_take_bit split: split_min_lin)
-    done
-  show \<open>a div 2 ^ n mod 2 ^ m = a mod (2 ^ (n + m)) div 2 ^ n\<close>
-    for a :: "'a word" and m n :: nat
-    by transfer (auto simp add: not_less take_bit_drop_bit ac_simps simp flip: take_bit_eq_mod drop_bit_eq_div split: split_min_lin)
-  show \<open>even ((2 ^ m - 1) div (2::'a word) ^ n) \<longleftrightarrow> 2 ^ n = (0::'a word) \<or> m \<le> n\<close>
-    for m n :: nat
-    by transfer
-      (simp flip: drop_bit_eq_div mask_eq_exp_minus_1 add: bit_simps even_drop_bit_iff_not_bit not_less)
-  show \<open>even (a * 2 ^ m div 2 ^ n) \<longleftrightarrow> n < m \<or> (2::'a word) ^ n = 0 \<or> m \<le> n \<and> even (a div 2 ^ (n - m))\<close>
-    for a :: \<open>'a word\<close> and m n :: nat
-  proof transfer
-    show \<open>even (take_bit LENGTH('a) (k * 2 ^ m) div take_bit LENGTH('a) (2 ^ n)) \<longleftrightarrow>
-      n < m
-      \<or> take_bit LENGTH('a) ((2::int) ^ n) = take_bit LENGTH('a) 0
-      \<or> (m \<le> n \<and> even (take_bit LENGTH('a) k div take_bit LENGTH('a) (2 ^ (n - m))))\<close>
-    for m n :: nat and k l :: int
-      by (auto simp flip: take_bit_eq_mod drop_bit_eq_div push_bit_eq_mult
-        simp add: div_push_bit_of_1_eq_drop_bit drop_bit_take_bit drop_bit_push_bit_int [of n m])
-  qed
+  show \<open>even (2 * a div 2 ^ Suc n) \<longleftrightarrow> even (a div 2 ^ n)\<close> if \<open>2 ^ Suc n \<noteq> (0::'a word)\<close>
+    for a :: \<open>'a word\<close> and n :: nat
+    using that by transfer
+      (simp add: even_drop_bit_iff_not_bit bit_simps flip: drop_bit_eq_div del: power.simps)
 qed
 
 end
@@ -991,12 +978,49 @@ lift_definition take_bit_word :: \<open>nat \<Rightarrow> 'a word \<Rightarrow> 
   is \<open>\<lambda>n. take_bit (min LENGTH('a) n)\<close>
   by (simp add: ac_simps) (simp only: flip: take_bit_take_bit)
 
-instance apply (standard; transfer)
-  apply (auto simp add: minus_eq_not_minus_1 mask_eq_exp_minus_1
-    bit_simps set_bit_def flip_bit_def take_bit_drop_bit
-    simp flip: drop_bit_eq_div take_bit_eq_mod)
-   apply (simp_all add: drop_bit_take_bit flip: push_bit_eq_mult)
-  done
+context
+  includes bit_operations_syntax
+begin
+
+instance proof
+  fix v w :: \<open>'a word\<close> and n m :: nat
+  show \<open>NOT v = - v - 1\<close>
+    by transfer (simp add: not_eq_complement)
+  show \<open>v AND w = of_bool (odd v \<and> odd w) + 2 * (v div 2 AND w div 2)\<close>
+    apply transfer
+    apply (rule bit_eqI)
+    apply (auto simp add: even_bit_succ_iff bit_simps bit_0 simp flip: bit_Suc)
+    done
+  show \<open>v OR w = of_bool (odd v \<or> odd w) + 2 * (v div 2 OR w div 2)\<close>
+    apply transfer
+    apply (rule bit_eqI)
+    apply (auto simp add: even_bit_succ_iff bit_simps bit_0 simp flip: bit_Suc)
+    done
+  show \<open>v XOR w = of_bool (odd v \<noteq> odd w) + 2 * (v div 2 XOR w div 2)\<close>
+    apply transfer
+    apply (rule bit_eqI)
+    subgoal for k l n
+      apply (cases n)
+       apply (auto simp add: even_bit_succ_iff bit_simps bit_0 even_xor_iff simp flip: bit_Suc)
+      done
+    done
+  show \<open>mask n = 2 ^ n - (1 :: 'a word)\<close>
+    by transfer (simp flip: mask_eq_exp_minus_1)
+  show \<open>set_bit n v = v OR push_bit n 1\<close>
+    by transfer (simp add: set_bit_eq_or)
+  show \<open>unset_bit n v = (v OR push_bit n 1) XOR push_bit n 1\<close>
+    by transfer (simp add: unset_bit_eq_or_xor)
+  show \<open>flip_bit n v = v XOR push_bit n 1\<close>
+    by transfer (simp add: flip_bit_eq_xor)
+  show \<open>push_bit n v = v * 2 ^ n\<close>
+    by transfer (simp add: push_bit_eq_mult)
+  show \<open>drop_bit n v = v div 2 ^ n\<close>
+    by transfer (simp add: drop_bit_take_bit flip: drop_bit_eq_div)
+  show \<open>take_bit n v = v mod 2 ^ n\<close>
+    by transfer (simp flip: take_bit_eq_mod)
+qed
+
+end
 
 end
 
@@ -1143,7 +1167,7 @@ lemma unsigned_take_bit_eq:
 
 end
 
-context unique_euclidean_semiring_with_bit_operations
+context linordered_euclidean_semiring_bit_operations
 begin
 
 lemma unsigned_drop_bit_eq:
@@ -1301,32 +1325,6 @@ lemma sint_less:
   \<open>sint w < 2 ^ (LENGTH('a) - Suc 0)\<close> for w :: \<open>'a::len word\<close>
   by (cases \<open>bit w (LENGTH('a) - Suc 0)\<close>; transfer)
     (simp_all add: signed_take_bit_eq signed_take_bit_def not_eq_complement mask_eq_exp_minus_1 OR_upper)
-
-lemma unat_div_distrib:
-  \<open>unat (v div w) = unat v div unat w\<close>
-proof transfer
-  fix k l
-  have \<open>nat (take_bit LENGTH('a) k) div nat (take_bit LENGTH('a) l) \<le> nat (take_bit LENGTH('a) k)\<close>
-    by (rule div_le_dividend)
-  also have \<open>nat (take_bit LENGTH('a) k) < 2 ^ LENGTH('a)\<close>
-    by (simp add: nat_less_iff)
-  finally show \<open>(nat \<circ> take_bit LENGTH('a)) (take_bit LENGTH('a) k div take_bit LENGTH('a) l) =
-    (nat \<circ> take_bit LENGTH('a)) k div (nat \<circ> take_bit LENGTH('a)) l\<close>
-    by (simp add: nat_take_bit_eq div_int_pos_iff nat_div_distrib take_bit_nat_eq_self_iff)
-qed
-
-lemma unat_mod_distrib:
-  \<open>unat (v mod w) = unat v mod unat w\<close>
-proof transfer
-  fix k l
-  have \<open>nat (take_bit LENGTH('a) k) mod nat (take_bit LENGTH('a) l) \<le> nat (take_bit LENGTH('a) k)\<close>
-    by (rule mod_less_eq_dividend)
-  also have \<open>nat (take_bit LENGTH('a) k) < 2 ^ LENGTH('a)\<close>
-    by (simp add: nat_less_iff)
-  finally show \<open>(nat \<circ> take_bit LENGTH('a)) (take_bit LENGTH('a) k mod take_bit LENGTH('a) l) =
-    (nat \<circ> take_bit LENGTH('a)) k mod (nat \<circ> take_bit LENGTH('a)) l\<close>
-    by (simp add: nat_take_bit_eq mod_int_pos_iff less_le nat_mod_distrib take_bit_nat_eq_self_iff)
-qed
 
 lemma uint_div_distrib:
   \<open>uint (v div w) = uint v div uint w\<close>
@@ -3297,6 +3295,14 @@ text \<open>Use \<open>iszero\<close> to simplify equalities between word numera
 
 lemmas word_eq_numeral_iff_iszero [simp] =
   eq_numeral_iff_iszero [where 'a="'a::len word"]
+
+lemma word_less_eq_imp_half_less_eq:
+  \<open>v div 2 \<le> w div 2\<close> if \<open>v \<le> w\<close> for v w :: \<open>'a::len word\<close>
+  using that by (simp add: word_le_nat_alt unat_div div_le_mono)
+
+lemma word_half_less_imp_less_eq:
+  \<open>v \<le> w\<close> if \<open>v div 2 < w div 2\<close> for v w :: \<open>'a::len word\<close>
+  using that linorder_linear word_less_eq_imp_half_less_eq by fastforce
 
 
 subsection \<open>Word and nat\<close>

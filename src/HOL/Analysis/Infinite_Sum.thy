@@ -1961,7 +1961,7 @@ proof (rule nonneg_bdd_above_summable_on)
       by (metis (no_types, lifting) b4 infsum_mono2 norm_ge_zero summable_on_subset_banach x2_sum)
 
     have "norm (x i * y i) \<le> norm (x i * x i) + norm (y i * y i)" for i
-      unfolding norm_mult by (smt mult_left_mono mult_nonneg_nonneg mult_right_mono norm_ge_zero)
+      unfolding norm_mult by (smt (verit, best) abs_norm_cancel mult_mono not_sum_squares_lt_zero)
     hence "(\<Sum>i\<in>F. norm (x i * y i)) \<le> (\<Sum>i\<in>F. norm (x i * x i) + norm (y i * y i))"
       by (simp add: sum_mono)
     also have "\<dots> = (\<Sum>i\<in>F. norm (x i * x i)) + (\<Sum>i\<in>F. norm (y i * y i))"
@@ -2387,9 +2387,10 @@ qed
 lemma (in uniform_space) cauchy_filter_iff:
   "cauchy_filter F \<longleftrightarrow> (\<forall>P. eventually P uniformity \<longrightarrow> (\<exists>X. eventually (\<lambda>x. x \<in> X) F \<and> (\<forall>z\<in>X\<times>X. P z)))" 
   unfolding cauchy_filter_def le_filter_def
-  apply auto
-   apply (smt (z3) eventually_mono eventually_prod_same mem_Collect_eq)
-  using eventually_prod_same by blast                            
+  apply (auto simp: eventually_prod_same)
+   apply (metis (full_types) eventually_mono mem_Collect_eq)
+  apply blast
+  done
 
 lemma (in uniform_space) controlled_sequences_convergent_imp_complete_aux_sequence:
   fixes U :: "nat \<Rightarrow> ('a \<times> 'a) set"

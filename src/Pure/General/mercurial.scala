@@ -29,7 +29,7 @@ object Mercurial {
       val server_root = Future.promise[String]
       Isabelle_Thread.fork("hg") {
         val process =
-          Exn.capture { Bash.process(hg.command_line("serve", options = "--port 0 --print-url")) }
+          Exn.result { Bash.process(hg.command_line("serve", options = "--port 0 --print-url")) }
         server_process.fulfill_result(process)
         Exn.release(process).result(progress_stdout =
           line => if (!server_root.is_finished) {
@@ -100,7 +100,7 @@ object Mercurial {
 
   sealed case class Archive_Info(lines: List[String]) {
     def id: Option[String] = lines.collectFirst({ case Archive_Node(a) => a })
-    def tags: List[String] = for (Archive_Tag(tag) <- lines if tag != "tip") yield tag
+    def tags: List[String] = for (case Archive_Tag(tag) <- lines if tag != "tip") yield tag
   }
 
   def archive_info(root: Path): Option[Archive_Info] = {
@@ -352,18 +352,27 @@ object Mercurial {
       }
     }
 
-    def graph(): Graph = {
-      val Node = """^node: (\w{12}) (\w{12}) (\w{12})""".r
-      val log_result =
-        log(template = """node: {node|short} {p1node|short} {p2node|short}\n""")
-      split_lines(log_result).foldLeft(Graph.string[Unit]) {
-        case (graph, Node(x, y, z)) =>
-          val deps = List(y, z).filterNot(s => s.forall(_ == '0'))
-          val graph1 = (x :: deps).foldLeft(graph)(_.default_node(_, ()))
-          deps.foldLeft(graph1)({ case (g, dep) => g.add_edge(dep, x) })
-        case (graph, _) => graph
-      }
-    }
+    private val cache_graph = Synchronized[(List[String], Graph)]((Nil, Graph.string[Unit]))
+
+    def graph(): Graph =
+      cache_graph.change_result({ case (old_topo, old_graph) =>
+        val topo = heads(options = "--topo")
+        val graph =
+          if (topo == old_topo) old_graph
+          else {
+            val Node = """^node: (\w{12}) (\w{12}) (\w{12})""".r
+            val log_result =
+              log(template = """node: {node|short} {p1node|short} {p2node|short}\n""")
+            split_lines(log_result).foldLeft(Graph.string[Unit]) {
+              case (graph, Node(x, y, z)) =>
+                val deps = List(y, z).filterNot(s => s.forall(_ == '0'))
+                val graph1 = (x :: deps).foldLeft(graph)(_.default_node(_, ()))
+                deps.foldLeft(graph1)({ case (g, dep) => g.add_edge(dep, x) })
+              case (graph, _) => graph
+            }
+          }
+        (graph, (topo, graph))
+      })
   }
 
 

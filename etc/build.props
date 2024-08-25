@@ -18,6 +18,7 @@ sources = \
   src/Pure/Admin/build_status.scala \
   src/Pure/Admin/check_sources.scala \
   src/Pure/Admin/ci_build.scala \
+  src/Pure/Admin/component_bash_process.scala \
   src/Pure/Admin/component_csdp.scala \
   src/Pure/Admin/component_cvc5.scala \
   src/Pure/Admin/component_cygwin.scala \
@@ -26,12 +27,15 @@ sources = \
   src/Pure/Admin/component_eptcs.scala \
   src/Pure/Admin/component_foiltex.scala \
   src/Pure/Admin/component_fonts.scala \
+  src/Pure/Admin/component_hugo.scala \
+  src/Pure/Admin/component_javamail.scala \
   src/Pure/Admin/component_jdk.scala \
   src/Pure/Admin/component_jedit.scala \
   src/Pure/Admin/component_jsoup.scala \
   src/Pure/Admin/component_lipics.scala \
   src/Pure/Admin/component_llncs.scala \
   src/Pure/Admin/component_minisat.scala \
+  src/Pure/Admin/component_mlton.scala \
   src/Pure/Admin/component_pdfjs.scala \
   src/Pure/Admin/component_polyml.scala \
   src/Pure/Admin/component_postgresql.scala \
@@ -43,10 +47,24 @@ sources = \
   src/Pure/Admin/component_stack.scala \
   src/Pure/Admin/component_vampire.scala \
   src/Pure/Admin/component_verit.scala \
+  src/Pure/Admin/component_windows_app.scala \
   src/Pure/Admin/component_zipperposition.scala \
   src/Pure/Admin/component_zstd.scala \
   src/Pure/Admin/isabelle_cronjob.scala \
-  src/Pure/Admin/isabelle_devel.scala \
+  src/Pure/Build/browser_info.scala \
+  src/Pure/Build/build.scala \
+  src/Pure/Build/build_benchmark.scala \
+  src/Pure/Build/build_cluster.scala \
+  src/Pure/Build/build_job.scala \
+  src/Pure/Build/build_process.scala \
+  src/Pure/Build/build_schedule.scala \
+  src/Pure/Build/database_progress.scala \
+  src/Pure/Build/export.scala \
+  src/Pure/Build/export_theory.scala \
+  src/Pure/Build/file_format.scala \
+  src/Pure/Build/resources.scala \
+  src/Pure/Build/sessions.scala \
+  src/Pure/Build/store.scala \
   src/Pure/Concurrent/consumer_thread.scala \
   src/Pure/Concurrent/counter.scala \
   src/Pure/Concurrent/delay.scala \
@@ -54,6 +72,7 @@ sources = \
   src/Pure/Concurrent/future.scala \
   src/Pure/Concurrent/isabelle_thread.scala \
   src/Pure/Concurrent/mailbox.scala \
+  src/Pure/Concurrent/multithreading.scala \
   src/Pure/Concurrent/par_list.scala \
   src/Pure/Concurrent/synchronized.scala \
   src/Pure/GUI/color_value.scala \
@@ -64,6 +83,7 @@ sources = \
   src/Pure/GUI/wrap_panel.scala \
   src/Pure/General/antiquote.scala \
   src/Pure/General/base64.scala \
+  src/Pure/General/bibtex.scala \
   src/Pure/General/bytes.scala \
   src/Pure/General/cache.scala \
   src/Pure/General/codepoint.scala \
@@ -78,13 +98,16 @@ sources = \
   src/Pure/General/graph.scala \
   src/Pure/General/graph_display.scala \
   src/Pure/General/graphics_file.scala \
+  src/Pure/General/html.scala \
   src/Pure/General/http.scala \
   src/Pure/General/js.scala \
   src/Pure/General/json.scala \
   src/Pure/General/json_api.scala \
+  src/Pure/General/latex.scala \
   src/Pure/General/linear_set.scala \
   src/Pure/General/logger.scala \
   src/Pure/General/long_name.scala \
+  src/Pure/General/mail.scala \
   src/Pure/General/mailman.scala \
   src/Pure/General/mercurial.scala \
   src/Pure/General/multi_map.scala \
@@ -143,7 +166,6 @@ sources = \
   src/Pure/PIDE/prover.scala \
   src/Pure/PIDE/query_operation.scala \
   src/Pure/PIDE/rendering.scala \
-  src/Pure/PIDE/resources.scala \
   src/Pure/PIDE/session.scala \
   src/Pure/PIDE/text.scala \
   src/Pure/PIDE/xml.scala \
@@ -171,27 +193,18 @@ sources = \
   src/Pure/System/platform.scala \
   src/Pure/System/posix_interrupt.scala \
   src/Pure/System/process_result.scala \
+  src/Pure/System/program_progress.scala \
   src/Pure/System/progress.scala \
+  src/Pure/System/registry.scala \
   src/Pure/System/scala.scala \
+  src/Pure/System/setup_tool.scala \
   src/Pure/System/system_channel.scala \
   src/Pure/System/tty_loop.scala \
-  src/Pure/Thy/bibtex.scala \
-  src/Pure/Thy/browser_info.scala \
+  src/Pure/System/web_app.scala \
   src/Pure/Thy/document_build.scala \
-  src/Pure/Thy/export.scala \
-  src/Pure/Thy/export_theory.scala \
-  src/Pure/Thy/file_format.scala \
-  src/Pure/Thy/html.scala \
-  src/Pure/Thy/latex.scala \
-  src/Pure/Thy/sessions.scala \
-  src/Pure/Thy/store.scala \
   src/Pure/Thy/thy_element.scala \
   src/Pure/Thy/thy_header.scala \
   src/Pure/Thy/thy_syntax.scala \
-  src/Pure/Tools/build.scala \
-  src/Pure/Tools/build_cluster.scala \
-  src/Pure/Tools/build_job.scala \
-  src/Pure/Tools/build_process.scala \
   src/Pure/Tools/check_keywords.scala \
   src/Pure/Tools/debugger.scala \
   src/Pure/Tools/doc.scala \
@@ -200,6 +213,7 @@ sources = \
   src/Pure/Tools/dump.scala \
   src/Pure/Tools/flarum.scala \
   src/Pure/Tools/fontforge.scala \
+  src/Pure/Tools/go_setup.scala \
   src/Pure/Tools/java_monitor.scala \
   src/Pure/Tools/logo.scala \
   src/Pure/Tools/mkroot.scala \
@@ -313,14 +327,19 @@ sources = \
 services = \
   isabelle.Bash$Handler \
   isabelle.Bibtex$File_Format \
-  isabelle.Build$Default_Engine \
+  isabelle.Build$Engine$Default \
+  isabelle.Build_Schedule$Build_Engine \
+  isabelle.CI_Builds \
   isabelle.Document_Build$Build_Engine \
   isabelle.Document_Build$LIPIcs_LuaLaTeX_Engine \
   isabelle.Document_Build$LIPIcs_PDFLaTeX_Engine \
   isabelle.Document_Build$LuaLaTeX_Engine \
   isabelle.Document_Build$PDFLaTeX_Engine \
-  isabelle.CI_Builds \
+  isabelle.Dotnet_Setup \
+  isabelle.GHC_Setup \
+  isabelle.Go_Setup \
   isabelle.ML_Statistics$Handler \
+  isabelle.OCaml_Setup \
   isabelle.Print_Operation$Handler \
   isabelle.Scala$Handler \
   isabelle.Scala_Functions \

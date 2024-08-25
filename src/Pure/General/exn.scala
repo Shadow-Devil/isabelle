@@ -53,6 +53,9 @@ object Exn {
   case class Res[A](res: A) extends Result[A]
   case class Exn[A](exn: Throwable) extends Result[A]
 
+  def is_res[A](result: Result[A]): Boolean = result.isInstanceOf[Res[A]]
+  def is_exn[A](result: Result[A]): Boolean = result.isInstanceOf[Exn[A]]
+
   def the_res[A]: PartialFunction[Result[A], A] = { case Res(res) => res }
   def the_exn[A]: PartialFunction[Result[A], Throwable] = { case Exn(exn) => exn }
 
@@ -75,6 +78,9 @@ object Exn {
 
   /* interrupts */
 
+  def cause(exn: Throwable): Throwable =
+    isabelle.setup.Exn.cause(exn)
+
   def is_interrupt(exn: Throwable): Boolean =
     isabelle.setup.Exn.is_interrupt(exn)
 
@@ -87,7 +93,7 @@ object Exn {
       case _ => false
     }
 
-  def interruptible_capture[A](e: => A): Result[A] =
+  def result[A](e: => A): Result[A] =
     try { Res(e) }
     catch { case exn: Throwable if !is_interrupt(exn) => Exn[A](exn) }
 

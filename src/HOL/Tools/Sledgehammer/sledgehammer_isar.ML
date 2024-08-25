@@ -52,6 +52,7 @@ val e_definition_rule = "definition"
 val e_skolemize_rule = "skolemize"
 val leo2_extcnf_forall_neg_rule = "extcnf_forall_neg"
 val satallax_skolemize_rule = "tab_ex"
+val vampire_choice_axiom_rule = "choice_axiom"
 val vampire_skolemisation_rule = "skolemisation"
 val veriT_la_generic_rule = "la_generic"
 val veriT_simp_arith_rule = "simp_arith"
@@ -62,7 +63,7 @@ val zipperposition_cnf_rule = "cnf"
 
 val symbol_introduction_rules =
   [e_definition_rule, e_skolemize_rule, leo2_extcnf_forall_neg_rule, satallax_skolemize_rule,
-   spass_skolemize_rule, vampire_skolemisation_rule, z3_skolemize_rule,
+   spass_skolemize_rule, vampire_choice_axiom_rule, vampire_skolemisation_rule, z3_skolemize_rule,
    zipperposition_cnf_rule, zipperposition_define_rule] @ veriT_skolemize_rules
 
 fun is_ext_rule rule = (rule = leo2_extcnf_equal_neg_rule)
@@ -134,9 +135,12 @@ type isar_params =
   bool * (string option * string option) * Time.time * real option * bool * bool
   * (term, string) atp_step list * thm
 
-val basic_systematic_methods = [Metis_Method (NONE, NONE), Meson_Method, Blast_Method, SATx_Method]
-val basic_simp_based_methods = [Auto_Method, Simp_Method, Fastforce_Method, Force_Method]
-val basic_arith_methods = [Linarith_Method, Presburger_Method, Algebra_Method]
+val basic_systematic_methods =
+  [Metis_Method (NONE, NONE), Meson_Method, Blast_Method, SATx_Method, Argo_Method]
+val basic_simp_based_methods =
+  [Auto_Method, Simp_Method, Fastforce_Method, Force_Method]
+val basic_arith_methods =
+  [Linarith_Method, Presburger_Method, Algebra_Method]
 
 val arith_methods = basic_arith_methods @ basic_simp_based_methods @ basic_systematic_methods
 val systematic_methods =
@@ -258,6 +262,8 @@ fun isar_proof_text ctxt debug num_chained isar_proofs smt_proofs isar_params
             and is_referenced_in_proof l (Proof {steps, ...}) =
               exists (is_referenced_in_step l) steps
 
+            (* We try to introduce pure lemmas (not "obtains") close to where
+               they are used. *)
             fun insert_lemma_in_step lem
                 (step as Prove {qualifiers, obtains, label, goal, subproofs, facts = (ls, gs),
                  proof_methods, comment}) =
@@ -283,7 +289,8 @@ fun isar_proof_text ctxt debug num_chained isar_proofs smt_proofs isar_params
               end
             and insert_lemma_in_steps lem [] = [lem]
               | insert_lemma_in_steps lem (step :: steps) =
-                if is_referenced_in_step (the (label_of_isar_step lem)) step then
+                if not (null (obtains_of_isar_step lem))
+                   orelse is_referenced_in_step (the (label_of_isar_step lem)) step then
                   insert_lemma_in_step lem step @ steps
                 else
                   step :: insert_lemma_in_steps lem steps
@@ -471,8 +478,8 @@ fun isar_proof_text ctxt debug num_chained isar_proofs smt_proofs isar_params
               one_line_proof_text ctxt 0
                 (if is_less (play_outcome_ord (play_outcome, one_line_play)) then
                    (case isar_proof of
-                     Proof {steps = [Prove {facts = (_, gfs), proof_methods = meth :: _, ...}],
-                       ...} =>
+                     Proof {steps = [Prove {qualifiers = [Show], facts = (_, gfs),
+                       proof_methods = meth :: _, ...}], ...} =>
                      let
                        val used_facts' =
                          map_filter (fn s =>
@@ -483,7 +490,8 @@ fun isar_proof_text ctxt debug num_chained isar_proofs smt_proofs isar_params
                               SOME (s, (Global, General))) gfs
                      in
                        ((used_facts', (meth, play_outcome)), banner, subgoal, subgoal_count)
-                     end)
+                     end
+                   | _ => one_line_params)
                  else
                    one_line_params) ^
               (if isar_proofs = SOME true then "\n(No Isar proof available)" else "")

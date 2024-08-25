@@ -4,6 +4,306 @@ Isabelle NEWS -- history of user-relevant changes
 (Note: Isabelle/jEdit shows a tree-view of the NEWS file in Sidekick.)
 
 
+New in Isabelle2024 (May 2024)
+------------------------------
+
+*** General ***
+
+* Dropped support for very old operating systems. The platform
+base-lines are now as follows:
+
+  - Ubuntu Linux 18.04 LTS
+  - macOS 11 Big Sur
+  - Windows 10 or Windows Server 2012 R2
+
+* The arm64-linux platform is now officially supported, although a few
+(non-essential) tools are missing:
+
+  - Z3
+  - CVC4
+  - MLton
+  - Nunchaku + smbc (experimental)
+
+* The configuration option "unify_trace" (default: false) guards tracing
+of higher-order unification, which is ubiquitous in assumption steps and
+rule applications via resolution. This is disabled by default to avoid
+breakdown due to massive amounts of spurious messages.
+
+
+*** Document preparation ***
+
+* The bundled LaTeX LNCS style has been updated to version 2.23
+(02-Nov-2023). See also src/Doc/Demo_LLNCS/.
+
+
+*** HOL ***
+
+* Generated Scala code now works both with scalac -new-syntax or
+-old-syntax, but option -no-indent should always be used for robustness.
+Note that ISABELLE_SCALAC_OPTIONS provides options for Isabelle/Scala,
+which are also used for "export_code ... checking Scala".
+
+* Commands 'inductive_cases', 'inductive_simps', 'case_of_simps',
+'simps_of_case' now print results like 'theorem'.
+
+* Sledgehammer
+  - Update/rebuild of bundled provers:
+    . E prover 3.0, with native ARM64 executables
+    . Vampire 4.8 HO - Sledgehammer schedules (2023-10-19)
+    . veriT 2021.06.1-rmx - rebuild for arm64-linux
+    . Z3 4.4.1 for arm64-linux has been removed: unreliable, unstable.
+  - New implementation of moura tactic. INCOMPATIBILITY.
+  - Added support for "order" proof method to proof reconstruction.
+
+* Mirabelle:
+  - Removed proof reconstruction from "sledgehammer" action; the related
+    option "proof_method" was removed. Proof reconstruction is supported
+    directly by Sledgehammer and should be used instead. For more
+    information, see Sledgehammer's documentation relating to
+    "preplay_timeout". INCOMPATIBILITY.
+  - Added the action "order" testing the proof method of the same name.
+
+* Explicit type class for discrete_linear_ordered_semidom for integral
+semidomains with a discrete linear order.
+
+* Type class linordered_euclidean_semiring replaces the (rather
+technical) type class unique_euclidean_semiring_with_nat; type class
+unique_euclidean_ring_with_nat, which barely admits instances other than
+isomorphic to int, is discontinued; type class
+unique_euclidean_semiring_with_bit_operations is renamed to
+linordered_euclidean_semiring_bit_operations. Minor INCOMPATIBILITY.
+
+* Streamlined specification of type class (semi)ring_parity. Minor
+INCOMPATIBILITY.
+
+* Lemma even_succ_div_2 renamed to even_half_succ_eq. Minor
+INCOMPATIBILITY.
+
+* Theory "HOL.Relation":
+  - Added lemmas.
+      antisymp_on_image
+      asymp_on_image
+      irreflp_on_image
+      reflp_on_image
+      symp_on_image
+      totalp_on_image
+      transp_on_image
+
+* Theory "HOL.Transitive_Closure":
+  - Renamed lemma antisymp_on_reflcp to antisymp_on_reflclp.
+    Minor INCOMPATIBILITY.
+  - Added lemmas.
+      antisym_on_reflcl_if_asym_on
+      antisymp_on_reflclp_if_asymp_on
+      order_reflclp_if_transp_and_asymp
+      reflclp_greater_eq[simp]
+      reflclp_less_eq[simp]
+      relpow_left_unique
+      relpow_right_unique
+      relpow_trans[trans]
+      relpowp_left_unique
+      relpowp_right_unique
+      relpowp_trans[trans]
+      rtranclp_greater_eq[simp]
+      rtranclp_ident_if_reflp_and_transp
+      rtranclp_less_eq[simp]
+      tranclp_greater[simp]
+      tranclp_greater_eq[simp]
+      tranclp_ident_if_and_transp
+      tranclp_less[simp]
+      tranclp_less_eq[simp]
+
+* Theory "HOL.Wellfounded":
+  - Added predicates wf_on and wfp_on and redefined wfP to be
+    abbreviations. Lemmas wf_def and wfP_def are explicitly provided for
+    backward compatibility but their usage is discouraged. Minor
+    INCOMPATIBILITY.
+  - Added wfp as alias for wfP for greater consistency with other
+    predicates such as asymp, transp, or totalp.
+  - Added lemmas.
+      wellorder.wfp_on_less[simp]
+      wf_iff_ex_minimal
+      wf_onE_pf
+      wf_onI_pf
+      wf_on_antimono
+      wf_on_antimono_strong
+      wf_on_if_convertible_to_wf_on
+      wf_on_iff_ex_minimal
+      wf_on_iff_wf
+      wf_on_induct
+      wf_on_subset
+      wfp_iff_ex_minimal
+      wfp_on_antimono
+      wfp_on_antimono_strong
+      wfp_on_if_convertible_to_wfp_on
+      wfp_on_iff_ex_minimal
+      wfp_on_image
+      wfp_on_induct
+      wfp_on_inv_imagep
+      wfp_on_subset
+      wfp_on_wf_on_eq
+
+* Theory "HOL-Library.FSet":
+  - Added syntax for fBall and fBex.
+
+* Theory "HOL-Library.Multiset":
+  - Added lemmas.
+      trans_on_mult
+      transp_on_multp
+
+* Theory "HOL-ex.Sketch_and_Explore": improvements to generate more
+natural and readable proof sketches from proof states.
+
+* Session "HOL-Analysis": the syntax of Lebesgue integrals (LINT, LBINT,
+\<integral>, etc.) now requires parentheses in most cases. INCOMPATIBILITY.
+
+* Session "HOL-Analysis": corrected the definition of convex function
+(convex_on) to require the underlying set to be convex. INCOMPATIBILITY.
+
+* Session "HOL-Complex_Analysis": new, more general definition of
+meromorphicity. INCOMPATIBILITY.
+
+* Session "HOL-Data_Structures": automatic translation from HOL
+functions into corresponding step-counting running-time functions. See
+theory "HOL-Data_Structures.Define_Time_Function".
+
+
+*** ML ***
+
+* ML antiquotation "try" provides variants of exception handling that
+avoids accidental capture of physical interrupts (which could affect ML
+semantics in unpredictable ways):
+
+  \<^try>\<open>EXPR catch HANDLER\<close>
+  \<^try>\<open>EXPR finally HANDLER\<close>
+  \<^try>\<open>EXPR\<close>
+
+See also the implementations Isabelle_Thread.try_catch / try_finally /
+try. The HANDLER always runs as uninterruptible, but the EXPR uses the
+the current thread attributes (normally interruptible). Various examples
+occur in the Isabelle sources (.ML and .thy files).
+
+* Isabelle/ML explicitly rejects 'handle' with catch-all patterns.
+INCOMPATIBILITY, better use \<^try>\<open>...\<close> with 'catch' or 'finally', or
+as last resort declare [[ML_catch_all]] within the theory context.
+
+* ML antiquotation "simproc_setup" inlines an invocation of
+Simplifier.simproc_setup, using the same concrete syntax as the
+corresponding Isar command. This allows to introduce a new simproc
+conveniently within an ML module, and refer directly to its ML value.
+For example, the simproc "Record.eq" is defined in
+~~/src/HOL/Tools/record.ML as follows:
+
+  val eq_simproc = \<^simproc_setup>\<open>eq ("r = s") = \<open>K eq_proc\<close>\<close>;
+
+* Simplification procedures may be distinguished via characteristic
+theorems that are specified as 'identifier' in ML antiquotation
+"simproc_setup" (but not in the corresponding Isar command). This allows
+to work with several versions of the simproc, e.g. due to locale
+interpretations.
+
+* Proper interrupts (e.g. timeouts) are now distinguished from Poly/ML
+runtime system breakdown, using Exn.Interrupt_Breakdown as quasi-error.
+Exn.is_interrupt covers all kinds of interrupts as before, but
+Exn.is_interrupt_proper and Exn.is_interrupt_breakdown are more
+specific. Subtle INCOMPATIBILITY in the semantics of ML evaluation.
+
+
+*** System ***
+
+* More robust and scalable support for distributed build clusters, based
+on SSH and PostgreSQL. This includes advanced scheduling as follows:
+
+  isabelle build -o build_engine=build_schedule -H host1 -H host2
+
+* The command-line tool "isabelle build" now uses default 0 (instead of
+1) for option -j. This means that "isabelle build -H" will initialize
+the build queue and oversee remote workers, but not run any Isabelle
+sessions on its own account. INCOMPATIBILITY, use "isabelle build -j1
+-H" for the old behaviour, to have the local host participate as worker.
+
+* The Isabelle/Scala module isabelle.Registry provides hierarchic system
+configuration, based on a collection of TOML files (see also
+https://toml.io/en/v1.0.0). The settings variable ISABELLE_REGISTRY
+tells which files are included into isabelle.Registry.global by default.
+The bash function "isabelle_registry" may be used in component
+etc/settings or $ISABELLE_HOME_USER/etc/settings to append further
+files: a trailing question mark means that the entry is optional. The
+default settings use "$ISABELLE_HOME/etc/registry.toml?" and
+"$ISABELLE_HOME_USER/etc/registry.toml?" (in that order).
+
+* Isabelle build cluster specifications, as seen in "isabelle build"
+option "-H", now use the underlying system registry to determine actual
+host names, parameters, and system options. A name without prefix refers
+to the registry table "host": each entry consists of an optional
+"hostname" and further options. A name with the prefix "cluster." refers
+to the table "cluster": each entry provides "hosts", an array of names
+for entries of the table "host" as above, and additional options that
+apply to all hosts simultaneously.
+
+For example, consider "isabelle build -H a -H b -H cluster.xy" in the
+context of a system registry $ISABELLE_HOME_USER/etc/registry.toml like
+this:
+
+  host.a = { hostname = "host-a.acme.org", jobs = 2 }
+  host.b = { hostname = "host-b.acme.org", jobs = 2 }
+
+  host.x = { hostname = "server1.example.com" }
+  host.y = { hostname = "server2.example.com" }
+  cluster.xy = { hosts = ["x", "y"], jobs = 4 }
+
+If "hostname" is omitted, its default is the table entry name itself. If
+that contains a dot, it needs to be quoted according to TOML syntax:
+
+  host."host-a.acme.org" = { jobs = 2 }
+  host."host-b.acme.org" = { jobs = 2 }
+
+* Isabelle/Scala and derived Scala tools now use the syntax of Scala
+3.3, instead of 3.1. This is the "-old-syntax" variant (Java-like) as
+before, not "-new-syntax" (Python-like). Minor INCOMPATIBILITY.
+
+* Isabelle/Scala supports mailing via SMTP, based on new system
+component javamail (previously javax.mail) from jakarta 2.1.2
+using eclipse angus 2.0.2/2.0.1.
+
+* Isabelle/Scala now has some support for web-apps, using HTML 5 forms.
+
+* Directory src/Tools/Demo provides an Isabelle system component with
+command-line tool that is implemented in Isabelle/Scala. It serves as
+demonstration for user-defined tools.
+
+* Old $ISABELLE_HOME/bin/isabelle_scala_script has been removed.
+Command-line tools in Isabelle/Scala should be provided by a proper
+system component with etc/build.props, e.g. see src/Tools/Demo/.
+
+* The Isabelle component for the MLton compiler now covers macOS and
+Linux (Intel), while Windows and Linux (ARM) are unsupported. The
+default for ISABELLE_MLTON_OPTIONS should work most of the time, but may
+have to be overridden (e.g. in $ISABELLE_HOME_USER/etc/settings).
+
+* The command-line tools "isabelle go_setup" and "isabelle go" /
+"isabelle gofmt" support the Go development environment. This works
+uniformly on all Isabelle OS platforms, separately or simultaneously.
+
+For example:
+
+  isabelle go_setup
+  isabelle go env
+  isabelle go
+
+  isabelle go_setup -p all
+
+* Update to GHC stack-2.15.5, stackage-lts-22.15, ghc-9.6.4 with support
+for all platforms, including ARM Linux and Apple Silicon.
+
+* Update to .NET / Fsharp 8.0.x: the current long-term support version.
+
+* Update to official Poly/ML 5.9.1.
+
+* Update to OpenJDK 21: the current long-term support version of Java.
+
+
+
 New in Isabelle2023 (September 2023)
 ------------------------------------
 

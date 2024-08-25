@@ -46,10 +46,7 @@ object Component_Minisat {
 
       /* platform */
 
-      val platform_name =
-        proper_string(Isabelle_System.getenv("ISABELLE_PLATFORM64")) getOrElse
-          error("No 64bit platform")
-
+      val platform_name = Isabelle_Platform.self.ISABELLE_PLATFORM()
       val platform_dir =
         Isabelle_System.make_directory(component_dir.path + Path.basic(platform_name))
 
@@ -99,7 +96,7 @@ ISABELLE_MINISAT="$MINISAT_HOME/minisat"
 
       File.write(component_dir.README,
         "This Isabelle component provides Minisat " + version + """ using the
-sources from """.stripMargin + download_url + """
+sources from """ + download_url + """
 
 The executables have been built via "make r"; macOS requires to
 remove options "--static" and "-Wl,-soname,..." from the Makefile.

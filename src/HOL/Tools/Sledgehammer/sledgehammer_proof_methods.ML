@@ -18,6 +18,7 @@ sig
     Meson_Method |
     SMT_Method of SMT_backend |
     SATx_Method |
+    Argo_Method |
     Blast_Method |
     Simp_Method |
     Auto_Method |
@@ -26,7 +27,8 @@ sig
     Moura_Method |
     Linarith_Method |
     Presburger_Method |
-    Algebra_Method
+    Algebra_Method |
+    Order_Method
 
   datatype play_outcome =
     Played of Time.time |
@@ -60,6 +62,7 @@ datatype proof_method =
   Meson_Method |
   SMT_Method of SMT_backend |
   SATx_Method |
+  Argo_Method |
   Blast_Method |
   Simp_Method |
   Auto_Method |
@@ -68,7 +71,8 @@ datatype proof_method =
   Moura_Method |
   Linarith_Method |
   Presburger_Method |
-  Algebra_Method
+  Algebra_Method |
+  Order_Method
 
 datatype play_outcome =
   Played of Time.time |
@@ -101,6 +105,7 @@ fun string_of_proof_method ss meth =
       | SMT_Method (SMT_Verit strategy) =>
         "smt (" ^ commas ("verit" :: (if strategy = "default" then [] else [strategy])) ^ ")"
       | SATx_Method => "satx"
+      | Argo_Method => "argo"
       | Blast_Method => "blast"
       | Simp_Method => if null ss then "simp" else "simp add:"
       | Auto_Method => "auto"
@@ -109,7 +114,8 @@ fun string_of_proof_method ss meth =
       | Moura_Method => "moura"
       | Linarith_Method => "linarith"
       | Presburger_Method => "presburger"
-      | Algebra_Method => "algebra")
+      | Algebra_Method => "algebra"
+      | Order_Method => "order")
   in
     maybe_paren (space_implode " " (meth_s :: ss))
   end
@@ -141,6 +147,7 @@ fun tac_of_proof_method ctxt (local_facts, global_facts) meth =
         Method.insert_tac ctxt global_facts THEN'
         (case meth of
           SATx_Method => SAT.satx_tac ctxt
+        | Argo_Method => Argo_Tactic.argo_tac ctxt []
         | Blast_Method => blast_tac ctxt
         | Auto_Method => SELECT_GOAL (Clasimp.auto_tac ctxt)
         | Fastforce_Method => Clasimp.fast_force_tac ctxt
@@ -148,7 +155,8 @@ fun tac_of_proof_method ctxt (local_facts, global_facts) meth =
         | Moura_Method => moura_tac ctxt
         | Linarith_Method => Lin_Arith.tac ctxt
         | Presburger_Method => Cooper.tac true [] [] ctxt
-        | Algebra_Method => Groebner.algebra_tac [] [] ctxt)))
+        | Algebra_Method => Groebner.algebra_tac [] [] ctxt
+        | Order_Method => HOL_Order_Tac.tac [] ctxt)))
   end
 
 fun string_of_play_outcome (Played time) = string_of_ext_time (false, time)
@@ -156,12 +164,10 @@ fun string_of_play_outcome (Played time) = string_of_ext_time (false, time)
     if time = Time.zeroTime then "" else string_of_ext_time (true, time) ^ ", timed out"
   | string_of_play_outcome Play_Failed = "failed"
 
-fun play_outcome_ord (Played time1, Played time2) =
-    int_ord (apply2 Time.toMilliseconds (time1, time2))
+fun play_outcome_ord (Played time1, Played time2) = Time.compare (time1, time2)
   | play_outcome_ord (Played _, _) = LESS
   | play_outcome_ord (_, Played _) = GREATER
-  | play_outcome_ord (Play_Timed_Out time1, Play_Timed_Out time2) =
-    int_ord (apply2 Time.toMilliseconds (time1, time2))
+  | play_outcome_ord (Play_Timed_Out time1, Play_Timed_Out time2) = Time.compare (time1, time2)
   | play_outcome_ord (Play_Timed_Out _, _) = LESS
   | play_outcome_ord (_, Play_Timed_Out _) = GREATER
   | play_outcome_ord (Play_Failed, Play_Failed) = EQUAL

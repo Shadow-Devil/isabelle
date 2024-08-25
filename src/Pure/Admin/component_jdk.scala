@@ -33,8 +33,8 @@ object Component_JDK {
   /* build jdk */
 
   val default_base_url = "https://cdn.azul.com/zulu/bin"
-  val default_jdk_version = "17.0.7"
-  val default_zulu_version = "17.42.19-ca"
+  val default_jdk_version = "21.0.3"
+  val default_zulu_version = "21.34.19-ca"
 
   def build_jdk(
     target_dir: Path = Path.current,
@@ -91,15 +91,15 @@ object Component_JDK {
 
     component_dir.write_settings("""
 case "$ISABELLE_PLATFORM_FAMILY" in
-  linux)
+  linux*)
     ISABELLE_JAVA_PLATFORM="$ISABELLE_PLATFORM64"
     ISABELLE_JDK_HOME="$COMPONENT/$ISABELLE_JAVA_PLATFORM"
     ;;
-  windows)
+  windows*)
     ISABELLE_JAVA_PLATFORM="$ISABELLE_WINDOWS_PLATFORM64"
     ISABELLE_JDK_HOME="$COMPONENT/$ISABELLE_JAVA_PLATFORM"
     ;;
-  macos)
+  macos*)
     if [ -n "$ISABELLE_APPLE_PLATFORM64" -a -d "$COMPONENT/$ISABELLE_APPLE_PLATFORM64" ]
     then
       ISABELLE_JAVA_PLATFORM="$ISABELLE_APPLE_PLATFORM64"

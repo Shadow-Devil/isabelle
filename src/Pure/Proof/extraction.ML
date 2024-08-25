@@ -100,8 +100,8 @@ fun condrew thy rules procs =
       in
         get_first (fn (_, (prems, (tm1, tm2))) =>
         let
-          fun ren t = the_default t (Term.rename_abs tm1 tm t);
-          val inc = Logic.incr_indexes ([], [], maxidx_of_term tm + 1);
+          fun ren t = perhaps (Term.rename_abs tm1 tm) t;
+          val inc = Logic.incr_indexes ([], maxidx_of_term tm + 1);
           val env as (Tenv, tenv) = Pattern.match thy (inc tm1, tm) (Vartab.empty, Vartab.empty);
           val prems' = map (apply2 (Envir.subst_term env o inc o ren)) prems;
           val env' = Envir.Envir
@@ -184,6 +184,8 @@ fun make_proof_body prf =
       PBody
        {oracles = Ord_List.make Proofterm.oracle_ord oracles,
         thms = Ord_List.make Proofterm.thm_ord thms,
+        zboxes = [],
+        zproof = ZDummy,
         proof = prf};
   in Proofterm.thm_body body end;
 
@@ -387,8 +389,11 @@ fun abs_corr_shyps thy thm vs xs prf =
       (build_rev (Term.add_vars prop'));
     val cs = maps (fn T => map (pair T) S) Ts;
     val constraints' = map Logic.mk_of_class cs;
-    fun typ_map T = Type.strip_sorts
-      (map_atyps (fn U => if member (op =) atyps U then (#atyp_map ucontext) U else U) T);
+    val typ_map = Term.strip_sortsT o
+      Term.map_atyps (fn U =>
+        if member (op =) atyps U
+        then #typ_operation ucontext {strip_sorts = false} U
+        else raise Same.SAME);
     fun mk_hyp (T, c) = Hyp (Logic.mk_of_class (typ_map T, c));
     val xs' = map (map_types typ_map) xs
   in
@@ -412,8 +417,8 @@ fun add_expand_thm is_def thm thy =
     thy |> ExtractionData.put
       (if is_def then
         {realizes_eqns = realizes_eqns,
-         typeof_eqns = add_rule ([], Logic.dest_equals (map_types
-           Type.strip_sorts (Thm.prop_of (Drule.abs_def thm)))) typeof_eqns,
+         typeof_eqns = typeof_eqns
+          |> add_rule ([], Logic.dest_equals (Term.strip_sorts (Thm.prop_of (Drule.abs_def thm)))),
          types = types,
          realizers = realizers, defs = insert Thm.eq_thm_prop (Thm.trim_context thm) defs,
          expand = expand, prep = prep}
@@ -549,7 +554,7 @@ fun extract thm_vss thy =
       | corr d vs ts Ts hs cs t (Abst (s, SOME T, prf)) (Abst (_, _, prf')) defs =
           let val (corr_prf, defs') = corr d vs [] (T :: Ts)
             (dummyt :: hs) cs (case t of SOME (Abs (_, _, u)) => SOME u | _ => NONE)
-            prf (Proofterm.incr_pboundvars 1 0 prf') defs
+            prf (Proofterm.incr_boundvars 1 0 prf') defs
           in (Abst (s, SOME T, corr_prf), defs') end
 
       | corr d vs ts Ts hs cs t (AbsP (s, SOME prop, prf)) (AbsP (_, _, prf')) defs =
@@ -560,13 +565,13 @@ fun extract thm_vss thy =
               else (case t of SOME (Abs (_, _, u)) => SOME u | _ => NONE);
             val (corr_prf, defs') =
               corr d vs [] (T :: Ts) (prop :: hs)
-                (prop :: cs) u (Proofterm.incr_pboundvars 0 1 prf)
-                (Proofterm.incr_pboundvars 0 1 prf') defs;
+                (prop :: cs) u (Proofterm.incr_boundvars 0 1 prf)
+                (Proofterm.incr_boundvars 0 1 prf') defs;
             val rlz = Const ("realizes", T --> propT --> propT)
           in (
             if T = nullT then AbsP ("R",
               SOME (app_rlz_rews Ts vs (rlz $ nullt $ prop)),
-                Proofterm.prf_subst_bounds [nullt] corr_prf)
+                Proofterm.subst_bounds [nullt] corr_prf)
             else Abst (s, SOME T, AbsP ("R",
               SOME (app_rlz_rews (T :: Ts) vs
                 (rlz $ Bound 0 $ incr_boundvars 1 prop)), corr_prf)), defs')
@@ -683,14 +688,14 @@ fun extract thm_vss thy =
 
       | extr d vs ts Ts hs (Abst (s, SOME T, prf)) defs =
           let val (t, defs') = extr d vs []
-            (T :: Ts) (dummyt :: hs) (Proofterm.incr_pboundvars 1 0 prf) defs
+            (T :: Ts) (dummyt :: hs) (Proofterm.incr_boundvars 1 0 prf) defs
           in (Abs (s, T, t), defs') end
 
       | extr d vs ts Ts hs (AbsP (s, SOME t, prf)) defs =
           let
             val T = etype_of thy' vs Ts t;
             val (t, defs') =
-              extr d vs [] (T :: Ts) (t :: hs) (Proofterm.incr_pboundvars 0 1 prf) defs
+              extr d vs [] (T :: Ts) (t :: hs) (Proofterm.incr_boundvars 0 1 prf) defs
           in
             (if T = nullT then subst_bound (nullt, t) else Abs (s, T, t), defs')
           end
@@ -818,10 +823,9 @@ fun extract thm_vss thy =
       in
         thy
         |> Sign.add_consts [(b, fastype_of ft, NoSyn)]
-        |> Global_Theory.add_defs false
-           [((Binding.qualified_name (Thm.def_name (extr_name s vs)),
-             Logic.mk_equals (head, ft)), [])]
-        |-> (fn [def_thm] =>
+        |> Global_Theory.add_def
+           (Binding.qualified_name (Thm.def_name (extr_name s vs)), Logic.mk_equals (head, ft))
+        |-> (fn def_thm =>
            Spec_Rules.add_global b Spec_Rules.equational
              [Thm.term_of (Thm.lhs_of def_thm)] [def_thm]
            #> Code.declare_default_eqns_global [(def_thm, true)])

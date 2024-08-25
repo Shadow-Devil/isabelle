@@ -39,25 +39,32 @@ class Isabelle_Platform private(val settings: List[(String, String)]) {
     settings.collectFirst({ case (a, b) if a == name => b }).
       getOrElse(error("Bad platform settings variable: " + quote(name)))
 
-  val ISABELLE_PLATFORM_FAMILY: String = get("ISABELLE_PLATFORM_FAMILY")
   val ISABELLE_PLATFORM64: String = get("ISABELLE_PLATFORM64")
   val ISABELLE_WINDOWS_PLATFORM64: String = get("ISABELLE_WINDOWS_PLATFORM64")
   val ISABELLE_APPLE_PLATFORM64: String = get("ISABELLE_APPLE_PLATFORM64")
+
+  def ISABELLE_PLATFORM(windows: Boolean = false, apple: Boolean = false): String =
+    proper_string(if_proper(windows, ISABELLE_WINDOWS_PLATFORM64)) orElse
+    proper_string(if_proper(apple, ISABELLE_APPLE_PLATFORM64)) orElse
+    proper_string(ISABELLE_PLATFORM64) getOrElse error("Missing ISABELLE_PLATFORM64")
 
   def is_arm: Boolean =
     ISABELLE_PLATFORM64.startsWith("arm64-") ||
     ISABELLE_APPLE_PLATFORM64.startsWith("arm64-")
 
-  def is_linux: Boolean =
-    ISABELLE_PLATFORM_FAMILY == "linux" ||
-    ISABELLE_PLATFORM_FAMILY == "linux_arm"
-  def is_macos: Boolean = ISABELLE_PLATFORM_FAMILY == "macos"
-  def is_windows: Boolean = ISABELLE_PLATFORM_FAMILY == "windows"
+  val ISABELLE_PLATFORM_FAMILY: String = {
+    val family0 = get("ISABELLE_PLATFORM_FAMILY")
+    if (family0 == "linux" && is_arm) "linux_arm" else family0
+  }
+
+  def is_linux: Boolean = ISABELLE_PLATFORM_FAMILY.startsWith("linux")
+  def is_macos: Boolean = ISABELLE_PLATFORM_FAMILY.startsWith("macos")
+  def is_windows: Boolean = ISABELLE_PLATFORM_FAMILY.startsWith("windows")
 
   def arch_64: String = if (is_arm) "arm64" else "x86_64"
   def arch_64_32: String = if (is_arm) "arm64_32" else "x86_64_32"
 
-  def os_name: String = if (is_macos) "darwin" else ISABELLE_PLATFORM_FAMILY
+  def os_name: String = if (is_macos) "darwin" else if (is_windows) "windows" else "linux"
 
   override def toString: String = ISABELLE_PLATFORM_FAMILY
 }

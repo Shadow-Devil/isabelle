@@ -464,6 +464,10 @@ lemmas sums_Im = bounded_linear.sums [OF bounded_linear_Im]
 lemmas Re_suminf = bounded_linear.suminf[OF bounded_linear_Re]
 lemmas Im_suminf = bounded_linear.suminf[OF bounded_linear_Im]
 
+lemma continuous_on_Complex [continuous_intros]:
+  "continuous_on A f \<Longrightarrow> continuous_on A g \<Longrightarrow> continuous_on A (\<lambda>x. Complex (f x) (g x))"
+  unfolding Complex_eq by (intro continuous_intros)
+
 lemma tendsto_Complex [tendsto_intros]:
   "(f \<longlongrightarrow> a) F \<Longrightarrow> (g \<longlongrightarrow> b) F \<Longrightarrow> ((\<lambda>x. Complex (f x) (g x)) \<longlongrightarrow> Complex a b) F"
   unfolding Complex_eq by (auto intro!: tendsto_intros)
@@ -765,6 +769,14 @@ lemma Re_sum[simp]: "Re (sum f s) = (\<Sum>x\<in>s. Re (f x))"
 lemma Im_sum[simp]: "Im (sum f s) = (\<Sum>x\<in>s. Im(f x))"
   by (induct s rule: infinite_finite_induct) auto
 
+lemma Rats_complex_of_real_iff [iff]: "complex_of_real x \<in> \<rat> \<longleftrightarrow> x \<in> \<rat>"
+proof -
+  have "\<And>a b. \<lbrakk>0 < b; x = complex_of_int a / complex_of_int b\<rbrakk> \<Longrightarrow> x \<in> \<rat>"
+    by (metis Rats_divide Rats_of_int Re_complex_of_real Re_divide_of_real of_real_of_int_eq)
+  then show ?thesis
+    by (auto simp: elim!: Rats_cases')
+qed
+
 lemma sum_Re_le_cmod: "(\<Sum>i\<in>I. Re (z i)) \<le> cmod (\<Sum>i\<in>I. z i)"
   by (metis Re_sum complex_Re_le_cmod)
 
@@ -872,9 +884,6 @@ lemma divide_conv_cnj: "norm z = 1 \<Longrightarrow> x / z = x * cnj z"
 lemma i_not_in_Reals [simp, intro]: "\<i> \<notin> \<real>"
   by (auto simp: complex_is_Real_iff)
 
-lemma powr_power_complex: "z \<noteq> 0 \<or> n \<noteq> 0 \<Longrightarrow> (z powr u :: complex) ^ n = z powr (of_nat n * u)"
-  by (induction n) (auto simp: algebra_simps powr_add)
-  
 lemma cos_n_Re_cis_pow_n: "cos (real n * a) = Re (cis a ^ n)"
   by (auto simp add: DeMoivre)
 

@@ -6,9 +6,6 @@ Efficient type/term substitution.
 
 signature TERM_SUBST =
 sig
-  val map_atypsT_same: typ Same.operation -> typ Same.operation
-  val map_types_same: typ Same.operation -> term Same.operation
-  val map_aterms_same: term Same.operation -> term Same.operation
   val generalizeT_same: Names.set -> int -> typ Same.operation
   val generalize_same: Names.set * Names.set -> int -> term Same.operation
   val generalizeT: Names.set -> int -> typ -> typ
@@ -35,34 +32,6 @@ end;
 
 structure Term_Subst: TERM_SUBST =
 struct
-
-(* generic mapping *)
-
-fun map_atypsT_same f =
-  let
-    fun typ (Type (a, Ts)) = Type (a, Same.map typ Ts)
-      | typ T = f T;
-  in typ end;
-
-fun map_types_same f =
-  let
-    fun term (Const (a, T)) = Const (a, f T)
-      | term (Free (a, T)) = Free (a, f T)
-      | term (Var (v, T)) = Var (v, f T)
-      | term (Bound _) = raise Same.SAME
-      | term (Abs (x, T, t)) =
-          (Abs (x, f T, Same.commit term t)
-            handle Same.SAME => Abs (x, T, term t))
-      | term (t $ u) = (term t $ Same.commit term u handle Same.SAME => t $ term u);
-  in term end;
-
-fun map_aterms_same f =
-  let
-    fun term (Abs (x, T, t)) = Abs (x, T, term t)
-      | term (t $ u) = (term t $ Same.commit term u handle Same.SAME => t $ term u)
-      | term a = f a;
-  in term end;
-
 
 (* generalization of fixed variables *)
 
@@ -120,7 +89,7 @@ fun instantiate_frees_same (instT, inst) tm =
       val substT = instantiateT_frees_same instT;
       fun subst (Const (c, T)) = Const (c, substT T)
         | subst (Free (x, T)) =
-            let val (T', same) = (substT T, false) handle Same.SAME => (T, true) in
+            let val (T', same) = Same.commit_id substT T in
               (case Frees.lookup inst (x, T') of
                  SOME t' => t'
                | NONE => if same then raise Same.SAME else Free (x, T'))
@@ -168,7 +137,7 @@ fun inst_same maxidx (instT, inst) tm =
     fun subst (Const (c, T)) = Const (c, substT T)
       | subst (Free (x, T)) = Free (x, substT T)
       | subst (Var ((x, i), T)) =
-          let val (T', same) = (substT T, false) handle Same.SAME => (T, true) in
+          let val (T', same) = Same.commit_id substT T in
             (case Vars.lookup inst ((x, i), T') of
                SOME (t', j) => (maxify j; t')
              | NONE => (maxify i; if same then raise Same.SAME else Var ((x, i), T')))
@@ -191,7 +160,7 @@ fun inst_beta_same maxidx (instT, inst) tm =
     fun expand_head t =
       (case Term.head_of t of
         Var ((x, i), T) =>
-          let val (T', same) = (substT T, false) handle Same.SAME => (T, true) in
+          let val (T', same) = Same.commit_id substT T in
             (case Vars.lookup inst ((x, i), T') of
               SOME (t', j) => (maxify j; SOME t')
             | NONE => (maxify i; if same then NONE else SOME (Var ((x, i), T'))))

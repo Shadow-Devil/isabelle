@@ -8,6 +8,11 @@ structure ML_PP: sig end =
 struct
 
 val _ =
+  ML_system_pp (fn _ => fn _ => fn t =>
+    PolyML.PrettyString ("<thread " ^ quote (Isabelle_Thread.print t) ^
+      (if Isabelle_Thread.is_active t then "" else " (inactive)") ^ ">"));
+
+val _ =
   ML_system_pp (fn _ => fn _ => Pretty.to_polyml o Proof_Display.pp_context);
 
 val _ =
@@ -25,6 +30,10 @@ val _ =
 val _ =
   ML_system_pp (fn depth => fn _ =>
     ML_Pretty.to_polyml o Pretty.to_ML depth o Proof_Display.pp_typ Theory.get_pure);
+
+val _ =
+  ML_system_pp (fn depth => fn _ =>
+    ML_Pretty.to_polyml o Pretty.to_ML depth o Proof_Display.pp_ztyp Theory.get_pure);
 
 
 local

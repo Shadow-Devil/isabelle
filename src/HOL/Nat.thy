@@ -342,7 +342,10 @@ subsubsection \<open>Difference\<close>
 lemma Suc_diff_diff [simp]: "(Suc m - n) - Suc k = m - n - k"
   by (simp add: diff_diff_add)
 
-lemma diff_Suc_1 [simp]: "Suc n - 1 = n"
+lemma diff_Suc_1: "Suc n - 1 = n"
+  by simp
+
+lemma diff_Suc_1' [simp]: "Suc n - Suc 0 = n"
   by simp
 
 
@@ -843,19 +846,21 @@ lemma nat_le_iff_add: "m \<le> n \<longleftrightarrow> (\<exists>k. n = m + k)"
 
 text \<open>The naturals form an ordered \<open>semidom\<close> and a \<open>dioid\<close>.\<close>
 
-instance nat :: linordered_semidom
+instance nat :: discrete_linordered_semidom
 proof
   fix m n q :: nat
-  show "0 < (1::nat)"
+  show \<open>0 < (1::nat)\<close>
     by simp
-  show "m \<le> n \<Longrightarrow> q + m \<le> q + n"
+  show \<open>m \<le> n \<Longrightarrow> q + m \<le> q + n\<close>
     by simp
-  show "m < n \<Longrightarrow> 0 < q \<Longrightarrow> q * m < q * n"
+  show \<open>m < n \<Longrightarrow> 0 < q \<Longrightarrow> q * m < q * n\<close>
     by (simp add: mult_less_mono2)
-  show "m \<noteq> 0 \<Longrightarrow> n \<noteq> 0 \<Longrightarrow> m * n \<noteq> 0"
+  show \<open>m \<noteq> 0 \<Longrightarrow> n \<noteq> 0 \<Longrightarrow> m * n \<noteq> 0\<close>
     by simp
-  show "n \<le> m \<Longrightarrow> (m - n) + n = m"
+  show \<open>n \<le> m \<Longrightarrow> (m - n) + n = m\<close>
     by (simp add: add_diff_inverse_nat add.commute linorder_not_less)
+  show \<open>m < n \<longleftrightarrow> m + 1 \<le> n\<close>
+    by (simp add: Suc_le_eq)
 qed
 
 instance nat :: dioid
@@ -1920,6 +1925,9 @@ qed
 
 lemma Nats_induct [case_names of_nat, induct set: Nats]: "x \<in> \<nat> \<Longrightarrow> (\<And>n. P (of_nat n)) \<Longrightarrow> P x"
   by (rule Nats_cases) auto
+
+lemma Nats_nonempty [simp]: "\<nat> \<noteq> {}"
+  unfolding Nats_def by auto
 
 end
 

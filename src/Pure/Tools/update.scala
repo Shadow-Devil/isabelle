@@ -52,7 +52,7 @@ object Update {
     dirs: List[Path] = Nil,
     select_dirs: List[Path] = Nil,
     numa_shuffling: Boolean = false,
-    max_jobs: Int = 1,
+    max_jobs: Option[Int] = None,
     fresh_build: Boolean = false,
     no_build: Boolean = false
   ): Build.Results = {
@@ -61,7 +61,7 @@ object Update {
     val exclude: Set[String] =
       if (base_logics.isEmpty) Set.empty
       else {
-        Sessions.load_structure(options, dirs = dirs, select_dirs = select_dirs)
+        Sessions.load_structure(options, dirs = dirs ::: select_dirs)
           .selection(Sessions.Selection(sessions = base_logics))
           .build_graph.domain
       }
@@ -148,7 +148,7 @@ object Update {
         var dirs: List[Path] = Nil
         var fresh_build = false
         var session_groups: List[String] = Nil
-        var max_jobs = 1
+        var max_jobs: Option[Int] = None
         var base_logics: List[String] = List(default_base_logic)
         var no_build = false
         var options = Options.init()
@@ -192,7 +192,7 @@ Usage: isabelle update [OPTIONS] [SESSIONS ...]
         "d:" -> (arg => dirs = dirs ::: List(Path.explode(arg))),
         "f" -> (_ => fresh_build = true),
         "g:" -> (arg => session_groups = session_groups ::: List(arg)),
-        "j:" -> (arg => max_jobs = Value.Int.parse(arg)),
+        "j:" -> (arg => max_jobs = Some(Value.Nat.parse(arg))),
         "l:" -> (arg => base_logics = space_explode(',', arg)),
         "n" -> (_ => no_build = true),
         "o:" -> (arg => options = options + arg),
@@ -217,13 +217,13 @@ Usage: isabelle update [OPTIONS] [SESSIONS ...]
                 sessions = sessions),
               base_logics = base_logics,
               progress = progress,
-              build_heap,
-              clean_build,
+              build_heap = build_heap,
+              clean_build = clean_build,
               dirs = dirs,
               select_dirs = select_dirs,
               numa_shuffling = Host.numa_check(progress, numa_shuffling),
               max_jobs = max_jobs,
-              fresh_build,
+              fresh_build = fresh_build,
               no_build = no_build)
           }
 

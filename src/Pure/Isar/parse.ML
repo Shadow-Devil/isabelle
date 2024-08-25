@@ -8,7 +8,7 @@ signature PARSE =
 sig
   val group: (unit -> string) -> (Token.T list -> 'a) -> Token.T list -> 'a
   val !!! : (Token.T list -> 'a) -> Token.T list -> 'a
-  val !!!! : (Token.T list -> 'a) -> Token.T list -> 'a
+  val !!!! : (Context.generic * Token.src -> 'a) -> Context.generic * Token.src -> 'a
   val not_eof: Token.T parser
   val token: 'a parser -> Token.T parser
   val range: 'a parser -> ('a * Position.range) parser
@@ -123,7 +123,6 @@ sig
   val embedded_ml: ML_Lex.token Antiquote.antiquote list parser
   val read_antiq: Keyword.keywords -> 'a parser -> Symbol_Pos.T list * Position.T -> 'a
   val read_embedded: Proof.context -> Keyword.keywords -> 'a parser -> Input.source -> 'a
-  val read_embedded_src: Proof.context -> Keyword.keywords -> 'a parser -> Token.src -> 'a
 end;
 
 structure Parse: PARSE =
@@ -148,22 +147,10 @@ fun group s scan = scan || Scan.fail_with
 
 (* cut *)
 
-fun cut kind scan =
-  let
-    fun get_pos [] = " (end-of-input)"
-      | get_pos (tok :: _) = Position.here (Token.pos_of tok);
+val err_prefix = "Outer syntax error";
 
-    fun err (toks, NONE) = (fn () => kind ^ get_pos toks)
-      | err (toks, SOME msg) =
-          (fn () =>
-            let val s = msg () in
-              if String.isPrefix kind s then s
-              else kind ^ get_pos toks ^ ": " ^ s
-            end);
-  in Scan.!! err scan end;
-
-fun !!! scan = cut "Outer syntax error" scan;
-fun !!!! scan = cut "Corrupted outer syntax in presentation" scan;
+fun !!! scan = Scan.!!! err_prefix Token.input_position scan;
+fun !!!! scan = Scan.!!! err_prefix Token.context_input_position scan;
 
 
 
@@ -253,7 +240,7 @@ fun enum_positions sep scan =
 fun enum1 sep scan = scan ::: Scan.repeat ($$$ sep |-- !!! scan);
 fun enum sep scan = enum1 sep scan || Scan.succeed [];
 
-fun enum1' sep scan = scan ::: Scan.repeat (Scan.lift ($$$ sep) |-- scan);
+fun enum1' sep scan = scan ::: Scan.repeat (Scan.lift ($$$ sep) |-- !!!! scan);
 fun enum' sep scan = enum1' sep scan || Scan.succeed [];
 
 fun and_list1 scan = enum1 "and" scan;
@@ -532,9 +519,5 @@ fun read_embedded ctxt keywords parse input =
       SOME res => res
     | NONE => error ("Bad input" ^ Position.here (Input.pos_of input)))
   end;
-
-fun read_embedded_src ctxt keywords parse src =
-  Token.syntax (Scan.lift embedded_input) src ctxt
-  |> #1 |> read_embedded ctxt keywords parse;
 
 end;

@@ -370,11 +370,11 @@ fun indicate_success thm ctxt =
 
 (** setup **)
 
-fun simp_apply args ctxt cont =
+fun trace_rrule args ctxt cont =
   let
-    val {unconditional: bool, term: term, thm: thm, rrule: rrule} = args
+    val {unconditional: bool, cterm: cterm, thm: thm, rrule: rrule} = args
     val data =
-      {term = term,
+      {term = Thm.term_of cterm,
        unconditional = unconditional,
        ctxt = ctxt,
        thm = thm,
@@ -387,7 +387,7 @@ fun simp_apply args ctxt cont =
           (case res of
             NONE =>
               if Future.join (indicate_failure data ctxt') then
-                simp_apply args ctxt cont
+                trace_rrule args ctxt cont
               else NONE
           | SOME (thm, _) => (indicate_success thm ctxt'; res))
         end)
@@ -395,22 +395,30 @@ fun simp_apply args ctxt cont =
 
 val _ = Theory.setup
   (Simplifier.set_trace_ops
-    {trace_invoke = fn {depth, term} => recurse "Simplifier invoked" depth term,
-     trace_apply = simp_apply})
+    {trace_invoke = fn {depth, cterm} => recurse "Simplifier invoked" depth (Thm.term_of cterm),
+     trace_rrule = trace_rrule,
+     trace_simproc = fn _ => fn ctxt => fn cont => cont ctxt})
 
 val _ =
   Protocol_Command.define "Simplifier_Trace.reply"
-    (fn [serial_string, reply] =>
-      let
-        val serial = Value.parse_int serial_string
-        val result =
-          Synchronized.change_result futures
-            (fn tab => (Inttab.lookup tab serial, Inttab.delete_safe serial tab))
-      in
-        (case result of
-          SOME promise => Future.fulfill promise reply
-        | NONE => ()) (* FIXME handle protocol failure, just like in active.ML (!?) *)
-      end handle exn => if Exn.is_interrupt exn then () (*sic!*) else Exn.reraise exn)
+    let
+      fun body serial_string reply =
+        let
+          val serial = Value.parse_int serial_string
+          val result =
+            Synchronized.change_result futures
+              (fn tab => (Inttab.lookup tab serial, Inttab.delete_safe serial tab))
+        in
+          (case result of
+            SOME promise => Future.fulfill promise reply
+          | NONE => ()) (* FIXME handle protocol failure, just like in active.ML (!?) *)
+        end
+    in
+      fn [serial_string, reply] =>
+        (case Exn.capture_body (fn () => body serial_string reply) of
+          Exn.Res () => ()
+        | Exn.Exn exn => if Exn.is_interrupt exn then () (*sic!*) else Exn.reraise exn)
+    end;
 
 
 

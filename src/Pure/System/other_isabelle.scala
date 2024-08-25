@@ -33,9 +33,11 @@ final class Other_Isabelle private(
   val isabelle_home: Path,
   val isabelle_identifier: String,
   isabelle_home_url: String,
-  ssh: SSH.System,
-  progress: Progress
+  val ssh: SSH.System,
+  val progress: Progress
 ) {
+  other_isabelle =>
+
   override def toString: String = isabelle_home_url
 
 
@@ -47,9 +49,11 @@ final class Other_Isabelle private(
     echo: Boolean = false,
     strict: Boolean = true
   ): Process_Result = {
-    ssh.execute(
-      Isabelle_System.export_isabelle_identifier(isabelle_identifier) +
-        "cd " + ssh.bash_path(isabelle_home) + "\n" + script,
+    val env =
+      Isabelle_System.export_env(
+        user_home = ssh.user_home,
+        isabelle_identifier = isabelle_identifier)
+    ssh.execute(env + "cd " + ssh.bash_path(isabelle_home) + "\n" + script,
       progress_stdout = progress.echo_if(echo, _),
       progress_stderr = progress.echo_if(echo, _),
       redirect = redirect,
@@ -89,7 +93,7 @@ final class Other_Isabelle private(
 
   def resolve_components(
     echo: Boolean = false,
-    clean_platforms: Option[List[Platform.Family.Value]] = None,
+    clean_platforms: Option[List[Platform.Family]] = None,
     clean_archives: Boolean = false,
     component_repository: String = Components.static_component_repository
   ): Unit = {
@@ -145,6 +149,14 @@ final class Other_Isabelle private(
     else error("Cannot proceed with existing user settings file: " + etc_settings)
   }
 
+  def debug_settings(): List[String] = {
+    val debug = System.getProperty("isabelle.debug", "") == "true"
+    if (debug) {
+      List("ISABELLE_JAVA_SYSTEM_OPTIONS=\"$ISABELLE_JAVA_SYSTEM_OPTIONS -Disabelle.debug=true\"")
+    }
+    else Nil
+  }
+
 
   /* init */
 
@@ -152,7 +164,7 @@ final class Other_Isabelle private(
     other_settings: List[String] = init_components(),
     fresh: Boolean = false,
     echo: Boolean = false,
-    clean_platforms: Option[List[Platform.Family.Value]] = None,
+    clean_platforms: Option[List[Platform.Family]] = None,
     clean_archives: Boolean = false,
     component_repository: String = Components.static_component_repository
   ): Unit = {
@@ -163,6 +175,7 @@ final class Other_Isabelle private(
       clean_archives = clean_archives,
       component_repository = component_repository)
     scala_build(fresh = fresh, echo = echo)
+    Setup_Tool.init(other_isabelle)
   }
 
 

@@ -10,6 +10,7 @@ signature TERM_ITEMS =
 sig
   structure Key: KEY
   type key
+  exception DUP of key
   type 'a table
   val empty: 'a table
   val build: ('a table -> 'a table) -> 'a table
@@ -25,11 +26,15 @@ sig
   val get_first: (key * 'a -> 'b option) -> 'a table -> 'b option
   val lookup: 'a table -> key -> 'a option
   val defined: 'a table -> key -> bool
+  val update: key * 'a -> 'a table -> 'a table
+  val remove: key -> 'a table -> 'a table
+  val insert: ('a * 'a -> bool) -> key * 'a -> 'a table -> 'a table    (*exception DUP*)
   val add: key * 'a -> 'a table -> 'a table
   val make: (key * 'a) list -> 'a table
   val make1: key * 'a -> 'a table
   val make2: key * 'a -> key * 'a -> 'a table
   val make3: key * 'a -> key * 'a -> key * 'a -> 'a table
+  val unsynchronized_cache: (key -> 'a) -> key -> 'a
   type set = int table
   val add_set: key -> set -> set
   val make_set: key list -> set
@@ -54,6 +59,7 @@ type key = Key.key;
 (* table with length *)
 
 structure Table = Table(Key);
+exception DUP = Table.DUP;
 
 datatype 'a table = Table of 'a Table.table;
 
@@ -70,11 +76,17 @@ fun get_first get (Table tab) = Table.get_first get tab;
 fun lookup (Table tab) = Table.lookup tab;
 fun defined (Table tab) = Table.defined tab;
 
+fun update e (Table tab) = Table (Table.update e tab);
+fun remove x (Table tab) = Table (Table.delete_safe x tab);
+fun insert eq e (Table tab) = Table (Table.insert eq e tab);
+
 fun add entry (Table tab) = Table (Table.default entry tab);
 fun make es = build (fold add es);
 fun make1 e = build (add e);
 fun make2 e1 e2 = build (add e1 #> add e2);
 fun make3 e1 e2 e3 = build (add e1 #> add e2 #> add e3);
+
+val unsynchronized_cache = Table.unsynchronized_cache;
 
 
 (* set with order of addition *)
@@ -178,7 +190,7 @@ struct
 structure Term_Items = Term_Items
 (
   type key = indexname * typ;
-  val ord = pointer_eq_ord (prod_ord Term_Ord.fast_indexname_ord Term_Ord.typ_ord)
+  val ord = pointer_eq_ord (prod_ord Term_Ord.fast_indexname_ord Term_Ord.typ_ord);
 );
 open Term_Items;
 
@@ -199,12 +211,27 @@ struct
 structure Term_Items = Term_Items
 (
   type key = string;
-  val ord = fast_string_ord
+  val ord = fast_string_ord;
 );
 open Term_Items;
 
 val add_tfree_namesT = fold_atyps (fn TFree (a, _) => add_set a | _ => I);
 val add_tfree_names = fold_types add_tfree_namesT;
 val add_free_names = fold_aterms (fn Free (x, _) => add_set x | _ => I);
+
+end;
+
+
+structure Types:
+sig
+  include TERM_ITEMS
+  val add_atyps: term -> set -> set
+end =
+struct
+
+structure Term_Items = Term_Items(type key = typ val ord = Term_Ord.typ_ord);
+open Term_Items;
+
+val add_atyps = (fold_types o fold_atyps) add_set;
 
 end;

@@ -7,8 +7,8 @@ Immutable byte vectors versus UTF8 strings.
 package isabelle
 
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, FileInputStream, FileOutputStream, InputStream, OutputStream, File as JFile}
-import java.net.URL
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, FileInputStream, FileOutputStream,
+  InputStream, OutputStream, File => JFile}
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.StandardOpenOption
@@ -69,15 +69,16 @@ object Bytes {
       new Bytes(out.toByteArray, 0, out.size)
     }
 
-  def read_url(name: String): Bytes = using(Url(name).openStream)(read_stream(_))
+  def read_url(name: String): Bytes = using(Url(name).open_stream())(read_stream(_))
 
-  def read_file(file: JFile, offset: Long = 0L, limit: Long = Long.MaxValue): Bytes = {
+  def read_file(path: Path, offset: Long = 0L, limit: Long = Long.MaxValue): Bytes = {
+    val length = File.size(path)
     val start = offset.max(0L)
-    val len = (file.length - start).max(0L).min(limit)
+    val len = (length - start).max(0L).min(limit)
     if (len > Int.MaxValue) error("Cannot read large file slice: " + Space.bytes(len).print)
     else if (len == 0L) empty
     else {
-      using(FileChannel.open(file.toPath, StandardOpenOption.READ)) { java_path =>
+      using(FileChannel.open(path.java_path, StandardOpenOption.READ)) { java_path =>
         java_path.position(start)
         val n = len.toInt
         val buf = ByteBuffer.allocate(n)
@@ -93,8 +94,8 @@ object Bytes {
     }
   }
 
-  def read(file: JFile): Bytes = read_file(file)
-  def read(path: Path): Bytes = read_file(path.file)
+  def read(path: Path): Bytes = read_file(path)
+  def read(file: JFile): Bytes = read_file(File.path(file))
 
 
   /* write */

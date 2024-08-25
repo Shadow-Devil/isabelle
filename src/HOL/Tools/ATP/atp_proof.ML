@@ -514,8 +514,9 @@ fun parse_hol_typed_var x =
    || $$ "(" |-- parse_hol_typed_var --| $$ ")") x
 
 fun parse_simple_hol_term x =
-  (parse_fol_quantifier -- ($$ "[" |-- parse_hol_typed_var --| $$ "]" --| $$ ":") -- parse_hol_term
-      >> (fn ((q, ys), t) =>
+  (parse_fol_quantifier -- ($$ "[" |-- parse_hol_typed_var --| $$ "]" --| $$ ":")
+      -- parse_simple_hol_term
+    >> (fn ((q, ys), t) =>
           fold_rev
             (fn (var, ty) => fn r =>
                 AAbs (((var, the_default dummy_atype ty), r), [])
@@ -524,11 +525,12 @@ fun parse_simple_hol_term x =
                     else
                       I))
             ys t)
-  || Scan.this_string tptp_not |-- parse_hol_term >> mk_app (mk_simple_aterm tptp_not)
+  || Scan.this_string tptp_not |-- parse_simple_hol_term >> mk_app (mk_simple_aterm tptp_not)
   || scan_general_id -- Scan.option ($$ tptp_has_type |-- parse_type)
     >> (fn (var, typ_opt) => ATerm ((var, the_list typ_opt), []))
   || parse_hol_quantifier >> mk_simple_aterm
   || $$ "(" |-- parse_hol_term --| $$ ")"
+  || Scan.this_string tptp_not >> mk_simple_aterm
   || parse_literal_binary_op >> mk_simple_aterm
   || parse_nonliteral_binary_op >> mk_simple_aterm) x
 and parse_applied_hol_term x =
@@ -541,7 +543,14 @@ and parse_literal_hol_term x =
 and parse_hol_term x =
   (parse_literal_hol_term -- Scan.repeat (parse_nonliteral_binary_op -- parse_literal_hol_term)
     >> (fn (t1, c_ti_s) =>
-          fold (fn (c, ti) => fn left => mk_apps (mk_simple_aterm c) [left, ti]) c_ti_s t1)) x
+          let
+            val cs = map fst c_ti_s
+            val tis = t1 :: map snd c_ti_s
+            val (tis_but_k, tk) = split_last tis
+          in
+            fold_rev (fn (ti, c) => fn right => mk_apps (mk_simple_aterm c) [ti, right])
+              (tis_but_k ~~ cs) tk
+          end)) x
 
 fun parse_hol_formula x = (parse_hol_term #>> remove_hol_app #>> AAtom) x
 
@@ -624,7 +633,7 @@ val parse_dot_name = scan_general_id --| $$ "." --| scan_general_id
 val parse_spass_annotations =
   Scan.optional ($$ ":" |-- Scan.repeat (parse_dot_name --| Scan.option ($$ ","))) []
 
-(* We ignore the stars and the pluses that follow literals. *)
+(* We ignore the stars and the pluses that follow literals in SPASS's output. *)
 fun parse_decorated_atom x =
   (parse_fol_atom --| Scan.repeat ($$ "*" || $$ "+" || $$ " ")) x
 
@@ -653,7 +662,6 @@ fun parse_spass_line x =
 fun core_inference inf fact = ((fact, [fact]), Unknown, dummy_phi, inf, [])
 
 fun parse_line full local_name problem =
-  (* Satallax is handled separately, in "atp_satallax.ML". *)
   if local_name = spassN then parse_spass_line
   else parse_tstp_line full problem
 

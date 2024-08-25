@@ -41,11 +41,9 @@ object JSON {
 
   /* lexer */
 
-  object Kind extends Enumeration {
-    val KEYWORD, STRING, NUMBER, ERROR = this.Value
-  }
+  enum Kind { case KEYWORD, STRING, NUMBER, ERROR }
 
-  sealed case class Token(kind: Kind.Value, text: String) {
+  sealed case class Token(kind: Kind, text: String) {
     def is_keyword: Boolean = kind == Kind.KEYWORD
     def is_keyword(name: String): Boolean = kind == Kind.KEYWORD && text == name
     def is_string: Boolean = kind == Kind.STRING
@@ -88,7 +86,7 @@ object JSON {
       elem("", "\"\\/".contains(_)) |
       elem("", "bfnrt".contains(_)) ^^
         { case 'b' => '\b' case 'f' => '\f' case 'n' => '\n' case 'r' => '\r' case 't' => '\t' } |
-      'u' ~> repeated(character("0123456789abcdefABCDEF".contains(_)), 4, 4) ^^
+      'u' ~> repeated(character(Symbol.is_ascii_hex), 4, 4) ^^
         (s => Integer.parseInt(s, 16).toChar)
 
     def string_failure: Parser[Token] = '\"' ~> failure("Unterminated string")

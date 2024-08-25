@@ -114,11 +114,11 @@ fun term_of _ (PThm ({serial = i, name, types = Ts, ...}, _)) =
   | term_of Ts (Abst (s, opT, prf)) =
       let val T = the_default dummyT opT in
         Const ("Pure.Abst", (T --> proofT) --> proofT) $
-          Abs (s, T, term_of (T::Ts) (Proofterm.incr_pboundvars 1 0 prf))
+          Abs (s, T, term_of (T::Ts) (Proofterm.incr_boundvars 1 0 prf))
       end
   | term_of Ts (AbsP (s, t, prf)) =
       AbsPt $ the_default Term.dummy_prop t $
-        Abs (s, proofT, term_of (proofT::Ts) (Proofterm.incr_pboundvars 0 1 prf))
+        Abs (s, proofT, term_of (proofT::Ts) (Proofterm.incr_boundvars 0 1 prf))
   | term_of Ts (prf1 %% prf2) =
       AppPt $ term_of Ts prf1 $ term_of Ts prf2
   | term_of Ts (prf % opt) =
@@ -161,8 +161,7 @@ fun proof_of_term thy ty =
              | "thm" :: xs =>
                  let val name = Long_Name.implode xs;
                  in (case AList.lookup (op =) thms name of
-                     SOME thm =>
-                      fst (Proofterm.strip_combt (fst (Proofterm.strip_combP (Thm.proof_of thm))))
+                     SOME thm => Proofterm.term_head_of (Proofterm.proof_head_of (Thm.proof_of thm))
                    | NONE => error ("Unknown theorem " ^ quote name))
                  end
              | _ => error ("Illegal proof constant name: " ^ quote s))
@@ -178,13 +177,13 @@ fun proof_of_term thy ty =
           if T = proofT then
             error ("Term variable abstraction may not bind proof variable " ^ quote s)
           else Abst (s, if ty then SOME T else NONE,
-            Proofterm.incr_pboundvars (~1) 0 (prf_of [] prf))
+            Proofterm.incr_boundvars (~1) 0 (prf_of [] prf))
       | prf_of [] (Const ("Pure.AbsP", _) $ t $ Abs (s, _, prf)) =
           AbsP (s, case t of
                 Const ("Pure.dummy_pattern", _) => NONE
               | _ $ Const ("Pure.dummy_pattern", _) => NONE
               | _ => SOME (mk_term t),
-            Proofterm.incr_pboundvars 0 (~1) (prf_of [] prf))
+            Proofterm.incr_boundvars 0 (~1) (prf_of [] prf))
       | prf_of [] (Const ("Pure.AppP", _) $ prf1 $ prf2) =
           prf_of [] prf1 %% prf_of [] prf2
       | prf_of Ts (Const ("Pure.Appt", _) $ prf $ Const ("Pure.type", Type ("itself", [T]))) =
@@ -241,7 +240,7 @@ fun proof_of full thm =
     val prop = Thm.full_prop_of thm;
     val prf = Thm.proof_of thm;
   in
-    (case fst (Proofterm.strip_combt (fst (Proofterm.strip_combP prf))) of
+    (case Proofterm.term_head_of (Proofterm.proof_head_of prf) of
       PThm ({prop = prop', ...}, thm_body) =>
         if prop = prop' then Proofterm.thm_body_proof_raw thm_body else prf
     | _ => prf)

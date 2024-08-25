@@ -1,6 +1,6 @@
 diff -ru jedit5.6.0/jEdit/org/gjt/sp/jedit/syntax/Chunk.java jedit5.6.0-patched/jEdit/org/gjt/sp/jedit/syntax/Chunk.java
 --- jedit5.6.0/jEdit/org/gjt/sp/jedit/syntax/Chunk.java	2020-09-03 05:31:01.000000000 +0200
-+++ jedit5.6.0-patched/jEdit/org/gjt/sp/jedit/syntax/Chunk.java	2021-05-10 11:02:05.816257745 +0200
++++ jedit5.6.0-patched/jEdit/org/gjt/sp/jedit/syntax/Chunk.java	2024-04-25 12:56:22.208257322 +0200
 @@ -332,9 +332,9 @@
  	//{{{ Package private members
  
@@ -24,9 +24,21 @@ diff -ru jedit5.6.0/jEdit/org/gjt/sp/jedit/syntax/Chunk.java jedit5.6.0-patched/
  	private GlyphData glyphData;
  	//}}}
  
+@@ -926,6 +926,11 @@
+ 		}
+ 
+ 		@Override
++		public GlyphData computeIfAbsent(GlyphKey key, java.util.function.Function<? super GlyphKey, ? extends GlyphData> f) {
++			synchronized (this) { return super.computeIfAbsent(key, f); }
++		}
++
++		@Override
+ 		protected boolean removeEldestEntry(Map.Entry<GlyphKey, GlyphData> eldest)
+ 		{
+ 			return size() > capacity;
 diff -ru jedit5.6.0/jEdit/org/gjt/sp/jedit/textarea/TextArea.java jedit5.6.0-patched/jEdit/org/gjt/sp/jedit/textarea/TextArea.java
 --- jedit5.6.0/jEdit/org/gjt/sp/jedit/textarea/TextArea.java	2020-09-03 05:31:01.000000000 +0200
-+++ jedit5.6.0-patched/jEdit/org/gjt/sp/jedit/textarea/TextArea.java	2021-05-10 18:19:56.275495525 +0200
++++ jedit5.6.0-patched/jEdit/org/gjt/sp/jedit/textarea/TextArea.java	2023-11-20 15:31:55.825519645 +0100
 @@ -914,6 +914,11 @@
  		return chunkCache.getLineInfo(screenLine).physicalLine;
  	} //}}}
@@ -50,6 +62,15 @@ diff -ru jedit5.6.0/jEdit/org/gjt/sp/jedit/textarea/TextArea.java jedit5.6.0-pat
  		int count = 1;
  		char openBracket = '\0';
  		char closeBracket = '\0';
+@@ -6336,7 +6341,7 @@
+ 		{
+ 			int following = charBreaker.following(offset -
+ 					index0Offset);
+-			if (following == BreakIterator.DONE)
++			if (following == BreakIterator.DONE || (Runtime.version().feature() >= 20 && following == offset - index0Offset))
+ 			{
+ 				// This means a end of line. Then it is
+ 				// safe to assume 1 code unit is a character.
 diff -ru jedit5.6.0/jEdit/org/gjt/sp/jedit/TextUtilities.java jedit5.6.0-patched/jEdit/org/gjt/sp/jedit/TextUtilities.java
 --- jedit5.6.0/jEdit/org/gjt/sp/jedit/TextUtilities.java	2020-09-03 05:31:03.000000000 +0200
 +++ jedit5.6.0-patched/jEdit/org/gjt/sp/jedit/TextUtilities.java	2021-05-10 18:20:57.418571547 +0200

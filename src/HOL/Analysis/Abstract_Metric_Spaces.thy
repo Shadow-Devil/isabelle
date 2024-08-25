@@ -2562,12 +2562,12 @@ lemma derived_set_of_infinite_2:
 lemma derived_set_of_infinite_mball:
   "mtopology derived_set_of S = {x \<in> M. \<forall>e>0. infinite(S \<inter> mball x e)}"
   unfolding derived_set_of_infinite_openin_metric
-  by (meson centre_in_mball_iff openin_mball derived_set_of_infinite_1 derived_set_of_infinite_2)
+  by (metis (no_types, opaque_lifting) centre_in_mball_iff openin_mball derived_set_of_infinite_1 derived_set_of_infinite_2)
 
 lemma derived_set_of_infinite_mcball:
   "mtopology derived_set_of S = {x \<in> M. \<forall>e>0. infinite(S \<inter> mcball x e)}"
   unfolding derived_set_of_infinite_openin_metric
-  by (meson centre_in_mball_iff openin_mball derived_set_of_infinite_1 derived_set_of_infinite_2)
+  by (metis (no_types, opaque_lifting) centre_in_mball_iff openin_mball derived_set_of_infinite_1 derived_set_of_infinite_2)
 
 end
 
@@ -2671,7 +2671,8 @@ lemma continuous_map_uniformly_Cauchy_limit:
 proof -
   have "\<And>x. x \<in> topspace X \<Longrightarrow> \<exists>l. limitin mtopology (\<lambda>n. f n x) l sequentially"
     using \<open>mcomplete\<close> [unfolded mcomplete, rule_format] assms
-    by (smt (verit) contf continuous_map_def eventually_mono topspace_mtopology Pi_iff)
+    unfolding continuous_map_def Pi_iff topspace_mtopology
+    by (smt (verit, del_insts) eventually_mono)
   then obtain g where g: "\<And>x. x \<in> topspace X \<Longrightarrow> limitin mtopology (\<lambda>n. f n x) (g x) sequentially"
     by metis
   show thesis
@@ -3370,74 +3371,6 @@ next
     using empty_completely_metrizable_space by auto
 qed 
 
-
-subsection \<open>The "atin-within" filter for topologies\<close>
-
-(*FIXME: replace original definition of atin to be an abbreviation, like at / at_within
-    ("atin (_) (_)/ within (_)" [1000, 60] 60)*)
-definition atin_within :: "['a topology, 'a, 'a set] \<Rightarrow> 'a filter"
-  where "atin_within X a S = inf (nhdsin X a) (principal (topspace X \<inter> S - {a}))"
-
-lemma atin_within_UNIV [simp]:
-  shows "atin_within X a UNIV = atin X a"
-  by (simp add: atin_def atin_within_def)
-
-lemma eventually_atin_subtopology:
-  assumes "a \<in> topspace X"
-  shows "eventually P (atin (subtopology X S) a) \<longleftrightarrow> 
-    (a \<in> S \<longrightarrow> (\<exists>U. openin (subtopology X S) U \<and> a \<in> U \<and> (\<forall>x\<in>U - {a}. P x)))"
-  using assms by (simp add: eventually_atin)
-
-lemma eventually_atin_within:
-  "eventually P (atin_within X a S) \<longleftrightarrow> a \<notin> topspace X \<or> (\<exists>T. openin X T \<and> a \<in> T \<and> (\<forall>x\<in>T. x \<in> S \<and> x \<noteq> a \<longrightarrow> P x))"
-proof (cases "a \<in> topspace X")
-  case True
-  hence "eventually P (atin_within X a S) \<longleftrightarrow> 
-         (\<exists>T. openin X T \<and> a \<in> T \<and>
-          (\<forall>x\<in>T. x \<in> topspace X \<and> x \<in> S \<and> x \<noteq> a \<longrightarrow> P x))"
-    by (simp add: atin_within_def eventually_inf_principal eventually_nhdsin)
-  also have "\<dots> \<longleftrightarrow> (\<exists>T. openin X T \<and> a \<in> T \<and> (\<forall>x\<in>T. x \<in> S \<and> x \<noteq> a \<longrightarrow> P x))"
-    using openin_subset by (intro ex_cong) auto
-  finally show ?thesis by (simp add: True)
-qed (simp add: atin_within_def)
-
-lemma eventually_within_imp:
-   "eventually P (atin_within X a S) \<longleftrightarrow> eventually (\<lambda>x. x \<in> S \<longrightarrow> P x) (atin X a)"
-  by (auto simp add: eventually_atin_within eventually_atin)
-
-lemma limit_within_subset:
-   "\<lbrakk>limitin X f l (atin_within Y a S); T \<subseteq> S\<rbrakk> \<Longrightarrow> limitin X f l (atin_within Y a T)"
-  by (smt (verit) eventually_atin_within limitin_def subset_eq)
-
-lemma atin_subtopology_within:
-  assumes "a \<in> S"
-  shows "atin (subtopology X S) a = atin_within X a S"
-proof -
-  have "eventually P (atin (subtopology X S) a) \<longleftrightarrow> eventually P (atin_within X a S)" for P
-    unfolding eventually_atin eventually_atin_within openin_subtopology
-    using assms by auto
-  then show ?thesis
-    by (meson le_filter_def order.eq_iff)
-qed
-
-lemma limit_continuous_map_within:
-   "\<lbrakk>continuous_map (subtopology X S) Y f; a \<in> S; a \<in> topspace X\<rbrakk>
-    \<Longrightarrow> limitin Y f (f a) (atin_within X a S)"
-  by (metis Int_iff atin_subtopology_within continuous_map_atin topspace_subtopology)
-
-lemma atin_subtopology_within_if:
-  shows "atin (subtopology X S) a = (if a \<in> S then atin_within X a S else bot)"
-  by (simp add: atin_subtopology_within)
-
-lemma trivial_limit_atpointof_within:
-   "trivial_limit(atin_within X a S) \<longleftrightarrow>
-        (a \<notin> X derived_set_of S)"
-  by (auto simp: trivial_limit_def eventually_atin_within in_derived_set_of)
-
-lemma derived_set_of_trivial_limit:
-   "a \<in> X derived_set_of S \<longleftrightarrow> \<not> trivial_limit(atin_within X a S)"
-  by (simp add: trivial_limit_atpointof_within)
-
     
 subsection\<open>More sequential characterizations in a metric space\<close>
 
@@ -3992,7 +3925,8 @@ lemma uniformly_continuous_map_id [simp]:
 lemma uniformly_continuous_map_compose:
   assumes f: "uniformly_continuous_map m1 m2 f" and g: "uniformly_continuous_map m2 m3 g"
   shows "uniformly_continuous_map m1 m3 (g \<circ> f)"
-  by (smt (verit, ccfv_threshold) comp_apply f g Pi_iff uniformly_continuous_map_def)
+  using f g unfolding uniformly_continuous_map_def comp_apply Pi_iff
+  by metis
 
 lemma uniformly_continuous_map_real_const [simp]:
    "uniformly_continuous_map m euclidean_metric (\<lambda>x. c)"
@@ -5108,7 +5042,6 @@ proof -
     using  metrizable_topology_DD [of X I m] assms unfolding metrizable_space_def
     by (metis (full_types) completely_metrizable_space_def)
 qed
-
 
 proposition metrizable_space_product_topology:
   "metrizable_space (product_topology X I) \<longleftrightarrow>

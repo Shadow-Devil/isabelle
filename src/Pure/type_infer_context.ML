@@ -23,7 +23,7 @@ struct
 val const_sorts = Config.declare_bool ("const_sorts", \<^here>) (K true);
 
 fun const_type ctxt =
-  try ((not (Config.get ctxt const_sorts) ? Type.strip_sorts) o
+  try ((not (Config.get ctxt const_sorts) ? Term.strip_sortsT) o
     Consts.the_constraint (Proof_Context.consts_of ctxt));
 
 fun var_type ctxt = the_default dummyT o Proof_Context.def_type ctxt;
@@ -288,7 +288,7 @@ fun prepare ctxt raw_ts =
     val constrain_vars = Term.map_aterms
       (fn Free (x, T) => Type.constraint T (Free (x, var_type ctxt (x, ~1)))
         | Var (xi, T) => Type.constraint T (Var (xi, var_type ctxt xi))
-        | t => t);
+        | _ => raise Same.SAME);
 
     val ts = burrow_types (Syntax.check_typs ctxt) raw_ts;
     val idx = Type_Infer.param_maxidx_of ts + 1;

@@ -30,6 +30,7 @@ sig
 
   val leo2_extcnf_equal_neg_rule : string
   val satallax_tab_rule_prefix : string
+  val zipperposition_cnf_rule : string
 
   val forall_of : term -> term -> term
   val exists_of : term -> term -> term
@@ -57,6 +58,7 @@ sig
   val repair_waldmeister_endgame : (term, 'a) atp_step list -> (term, 'a) atp_step list
   val infer_formulas_types : Proof.context -> term list -> term list
   val introduce_spass_skolems : (term, string) atp_step list -> (term, string) atp_step list
+  val regroup_zipperposition_skolems : (term, string) atp_step list -> (term, string) atp_step list
   val factify_atp_proof : (string * 'a) list -> term list -> term -> (term, string) atp_step list ->
     (term, string) atp_step list
   val termify_atp_abduce_candidate : Proof.context -> string -> ATP_Problem.atp_format ->
@@ -101,11 +103,17 @@ val default_metis_lam_trans = combsN
 
 val leo2_extcnf_equal_neg_rule = "extcnf_equal_neg"
 val satallax_tab_rule_prefix = "tab_"
+val zipperposition_cnf_rule = "cnf"
+val pseudo_zipperposition_conjunct = "conjunct"
+
+val pseudo_zipperposition_skolemization_suffix = ".skolem"
 
 fun term_name' (Var ((s, _), _)) = perhaps (try Name.dest_skolem) s
   | term_name' _ = ""
 
 fun lambda' v = Term.lambda_name (term_name' v, v)
+
+fun If_const T = Const (\<^const_name>\<open>If\<close>, HOLogic.boolT --> T --> T --> T)
 
 fun forall_of v t = HOLogic.all_const (fastype_of v) $ lambda' v t
 fun exists_of v t = HOLogic.exists_const (fastype_of v) $ lambda' v t
@@ -237,8 +245,18 @@ fun robust_const_num_type_args thy s =
 
 fun slack_fastype_of t = fastype_of t handle TERM _ => Type_Infer.anyT \<^sort>\<open>type\<close>
 
-val spass_skolem_prefix = "sk" (* "skc" or "skf" *)
-val vampire_skolem_prefix = "sK"
+val spass_skolem_prefixes = ["skc", "skf"]
+val zipperposition_skolem_prefix = "sk"
+
+fun is_spass_skolem s =
+  exists (fn pre => String.isPrefix pre s) spass_skolem_prefixes
+
+val is_zipperposition_skolem = String.isPrefix zipperposition_skolem_prefix
+
+fun is_reverse_skolem s =
+  exists (fn pre => String.isPrefix pre s) (zipperposition_skolem_prefix :: spass_skolem_prefixes)
+
+val zip_internal_ite_prefix = "zip_internal_ite_"
 
 fun var_index_of_textual textual = if textual then 0 else 1
 
@@ -253,10 +271,12 @@ fun quantify_over_var textual quant_of var_s var_T t =
       | norm_var_types t = t
   in t |> map_aterms norm_var_types |> fold_rev quant_of (map Var normTs) end
 
-(* This assumes that distinct names are mapped to distinct names by "Variable.variant_frees". This
-   does not hold in general but should hold for ATP-generated Skolem function names, since these end
-   with a digit and "variant_frees" appends letters. *)
-fun fresh_up ctxt s = fst (hd (Variable.variant_frees ctxt [] [(s, ())]))
+(* This assumes that distinct names are mapped to distinct names by
+   "Variable.variant_frees". This does not hold in general but should hold for
+   ATP-generated Skolem function names, since these end with a digit and
+   "variant_frees" appends letters. *)
+fun desymbolize_and_fresh_up ctxt s =
+  fst (hd (Variable.variant_frees ctxt [] [(Name.desymbolize (SOME false) s, ())]))
 
 (* Higher-order translation. Variables are typed (although we don't use that information). Lambdas
    are typed. The code is similar to "term_of_atp_fo". *)
@@ -267,12 +287,16 @@ fun term_of_atp_ho ctxt sym_tab =
 
     fun do_term opt_T u =
       (case u of
-        AAbs (((var, ty), term), []) =>
+        AAbs (((var, ty), term), us) =>
         let
           val typ = typ_of_atp_type ctxt ty
           val var_name = repair_var_name var
           val tm = do_term NONE term
-        in quantify_over_var true lambda' var_name typ tm end
+          val lam = quantify_over_var true lambda' var_name typ tm
+          val args = map (do_term NONE) us
+        in
+          list_comb (lam, args)
+        end
       | ATerm ((s, tys), us) =>
         if s = "" (* special marker generated on parse error *) then
           error "Isar proof reconstruction failed because the ATP proof contains unparsable \
@@ -289,19 +313,34 @@ fun term_of_atp_ho ctxt sym_tab =
             val opt_T' = SOME (map slack_fastype_of args ---> the_default dummyT opt_T)
             val func = do_term opt_T' (ATerm ((s, tys), []))
           in foldl1 (op $) (func :: args) end
-        else if s = tptp_or then HOLogic.disj
-        else if s = tptp_and then HOLogic.conj
-        else if s = tptp_implies then HOLogic.imp
-        else if s = tptp_iff orelse s = tptp_equal then HOLogic.eq_const dummyT
-        else if s = tptp_not_iff orelse s = tptp_not_equal then \<^term>\<open>\<lambda>x y. x \<noteq> y\<close>
-        else if s = tptp_if then \<^term>\<open>\<lambda>P Q. Q \<longrightarrow> P\<close>
-        else if s = tptp_not_and then \<^term>\<open>\<lambda>P Q. \<not> (P \<and> Q)\<close>
-        else if s = tptp_not_or then \<^term>\<open>\<lambda>P Q. \<not> (P \<or> Q)\<close>
-        else if s = tptp_not then HOLogic.Not
-        else if s = tptp_ho_forall then HOLogic.all_const dummyT
-        else if s = tptp_ho_exists then HOLogic.exists_const dummyT
-        else if s = tptp_hilbert_choice then HOLogic.choice_const dummyT
-        else if s = tptp_hilbert_the then \<^term>\<open>The\<close>
+        else if s = tptp_or then
+          HOLogic.disj
+        else if s = tptp_and then
+          HOLogic.conj
+        else if s = tptp_implies then
+          HOLogic.imp
+        else if s = tptp_iff orelse s = tptp_equal then
+          HOLogic.eq_const dummyT
+        else if s = tptp_not_iff orelse s = tptp_not_equal then
+          \<^term>\<open>\<lambda>x y. x \<noteq> y\<close>
+        else if s = tptp_if then
+          \<^term>\<open>\<lambda>P Q. Q \<longrightarrow> P\<close>
+        else if s = tptp_not_and then
+          \<^term>\<open>\<lambda>P Q. \<not> (P \<and> Q)\<close>
+        else if s = tptp_not_or then
+          \<^term>\<open>\<lambda>P Q. \<not> (P \<or> Q)\<close>
+        else if s = tptp_not then
+          HOLogic.Not
+        else if s = tptp_ho_forall then
+          HOLogic.all_const dummyT
+        else if s = tptp_ho_exists then
+          HOLogic.exists_const dummyT
+        else if s = tptp_hilbert_choice then
+          HOLogic.choice_const dummyT
+        else if s = tptp_hilbert_the then
+          \<^term>\<open>The\<close>
+        else if String.isPrefix zip_internal_ite_prefix s then
+          If_const dummyT
         else
           (case unprefix_and_unascii const_prefix s of
             SOME s' =>
@@ -337,7 +376,7 @@ fun term_of_atp_ho ctxt sym_tab =
                 (case unprefix_and_unascii fixed_var_prefix s of
                   SOME s => Free (s, T)
                 | NONE =>
-                  if not (is_tptp_variable s) then Free (fresh_up ctxt s, T)
+                  if not (is_tptp_variable s) then Free (desymbolize_and_fresh_up ctxt s, T)
                   else Var ((repair_var_name s, var_index), T))
             in list_comb (t, ts) end))
   in do_term end
@@ -409,12 +448,7 @@ fun term_of_atp_fo ctxt textual sym_tab =
             end
           | NONE => (* a free or schematic variable *)
             let
-              val term_ts =
-                map (do_term [] NONE) us
-                (* SPASS (3.8ds) and Vampire (2.6) pass arguments to Skolem functions in reverse
-                   order, which is incompatible with "metis"'s new skolemizer. *)
-                |> exists (fn pre => String.isPrefix pre s)
-                  [spass_skolem_prefix, vampire_skolem_prefix] ? rev
+              val term_ts = map (do_term [] NONE) us |> is_reverse_skolem s ? rev
               val ts = term_ts @ extra_ts
               val T =
                 (case tys of
@@ -428,7 +462,7 @@ fun term_of_atp_fo ctxt textual sym_tab =
                   SOME s => Free (s, T)
                 | NONE =>
                   if textual andalso not (is_tptp_variable s) then
-                    Free (s |> textual ? fresh_up ctxt, T)
+                    Free (desymbolize_and_fresh_up ctxt s, T)
                   else
                     Var ((repair_var_name s, var_index), T))
             in list_comb (t, ts) end))
@@ -697,10 +731,8 @@ fun rename_skolem_args t =
       | add_skolem_args t =
         (case strip_comb t of
           (Free (s, _), args as _ :: _) =>
-          if String.isPrefix spass_skolem_prefix s then
-            insert (op =) (s, take_prefix is_Var args)
-          else
-            fold add_skolem_args args
+          if is_spass_skolem s then insert (op =) (s, take_prefix is_Var args)
+          else fold add_skolem_args args
         | (u, args as _ :: _) => fold add_skolem_args (u :: args)
         | _ => I)
 
@@ -714,7 +746,7 @@ fun rename_skolem_args t =
 
 fun introduce_spass_skolems proof =
   let
-    fun add_skolem (Free (s, _)) = String.isPrefix spass_skolem_prefix s ? insert (op =) s
+    fun add_skolem (Free (s, _)) = is_spass_skolem s ? insert (op =) s
       | add_skolem _ = I
 
     (* union-find would be faster *)
@@ -729,7 +761,7 @@ fun introduce_spass_skolems proof =
        rise to several clauses are skolemized together. *)
     val skoXss = map (fn ((_, ss), _, t, _, _) => Term.fold_aterms add_skolem t ss) input_steps
     val groups0 = Graph.strong_conn (fold add_cycle skoXss Graph.empty)
-    val groups = filter (exists (String.isPrefix spass_skolem_prefix)) groups0
+    val groups = filter (exists is_spass_skolem) groups0
 
     val skoXss_input_steps = skoXss ~~ input_steps
 
@@ -748,8 +780,7 @@ fun introduce_spass_skolems proof =
             |> map (HOLogic.dest_Trueprop #> rename_skolem_args)
             |> Library.foldr1 s_conj
             |> HOLogic.mk_Trueprop)
-        val skos =
-          fold (union (op =) o filter (String.isPrefix spass_skolem_prefix) o fst) skoXss_steps []
+        val skos = fold (union (op =) o filter is_spass_skolem o fst) skoXss_steps []
         val deps = map (snd #> #1) skoXss_steps
       in
         [(name0, Unknown, unskolemize_spass_term skos t, spass_pre_skolemize_rule, deps),
@@ -768,6 +799,56 @@ fun introduce_spass_skolems proof =
     input_steps @ sko_steps @ map repair_deps other_steps
   end
 
+fun regroup_zipperposition_skolems steps =
+  let
+    val contains_skolem =
+      Term.exists_subterm (fn Free (sk, _) => is_zipperposition_skolem sk | _ => false)
+
+    fun is_skolem_step (_, _, t, rule, _) =
+      rule = zipperposition_cnf_rule andalso contains_skolem t
+
+    val dep_to_skolem_steps = steps
+      |> filter is_skolem_step
+      |> map_filter (fn step as (_, _, _, _, [dep]) => SOME (fst dep, step)
+        | _ => NONE)
+      |> AList.group (op =)
+
+    val prop_of_skolem_steps =
+      map (#3 #> perhaps (try HOLogic.dest_Trueprop))
+      #> Library.foldr1 HOLogic.mk_conj
+      #> HOLogic.mk_Trueprop
+
+    fun insert_back_regrouped_skolem_steps (step as (name, _, _, _, _)) =
+      (case AList.lookup (op =) dep_to_skolem_steps (fst name) of
+        SOME skolem_steps =>
+        [step, ((fst name ^ pseudo_zipperposition_skolemization_suffix, []), Plain,
+           prop_of_skolem_steps skolem_steps, zipperposition_cnf_rule, [name])]
+      | NONE => [step])
+
+    fun adjust_dependencies (step as (name, role, t, _, [dep])) =
+        if is_skolem_step step then
+          (name, role, t, pseudo_zipperposition_conjunct,
+           [(fst dep ^ pseudo_zipperposition_skolemization_suffix, [])])
+        else
+          step
+     | adjust_dependencies step = step
+  in
+    steps
+    |> map adjust_dependencies
+    |> maps insert_back_regrouped_skolem_steps
+  end
+
+val zf_stmt_prefix = "zf_stmt_"
+
+fun is_if_True_or_False_axiom true_or_false t =
+  (case t of
+    @{const Trueprop} $
+     (Const (@{const_name HOL.eq}, _) $
+       (Const (@{const_name If}, _) $ cond $ Var _ $ Var _) $
+       Var _) =>
+     cond aconv true_or_false
+  | _ => false)
+
 fun factify_atp_proof facts hyp_ts concl_t atp_proof =
   let
     fun factify_step ((num, ss), role, t, rule, deps) =
@@ -779,10 +860,21 @@ fun factify_atp_proof facts hyp_ts concl_t atp_proof =
             else ([], Hypothesis, close_form (nth hyp_ts j))
           | _ =>
             (case resolve_facts facts (num :: ss) of
-              [] => (ss, if member (op =) [Definition, Lemma] role then role else Plain, t)
+              [] =>
+              if role = Axiom andalso String.isPrefix zf_stmt_prefix num
+                 andalso is_if_True_or_False_axiom @{const True} t then
+                (["if_True"], Axiom, t)
+              else if role = Axiom andalso String.isPrefix zf_stmt_prefix num
+                 andalso is_if_True_or_False_axiom @{const False} t then
+                (["if_False"], Axiom, t)
+              else
+                (ss,
+                 if role = Definition then Definition
+                 else if role = Lemma then Lemma
+                 else Plain, t)
             | facts => (map fst facts, Axiom, t)))
       in
-        ((num, ss'), role', t', rule, deps)
+        ((num, ss' |> distinct (op =)), role', t', rule, deps)
       end
 
     val atp_proof = map factify_step atp_proof

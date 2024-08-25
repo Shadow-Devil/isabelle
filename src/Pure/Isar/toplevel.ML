@@ -331,8 +331,9 @@ fun apply_markers name markers (state as State ((node, pr_ctxt), prev_thy)) =
 in
 
 fun apply_capture int name markers trans state =
-  (apply_body int trans state |> apply_markers name markers)
-    handle exn => (state, SOME exn);
+  (case Exn.capture_body (fn () => apply_body int trans state |> apply_markers name markers) of
+    Exn.Res res => res
+  | Exn.Exn exn => (state, SOME exn));
 
 end;
 
@@ -661,7 +662,7 @@ fun command_exception int tr st =
   (case transition int tr st of
     (st', NONE) => st'
   | (_, SOME (exn, info)) =>
-      if Exn.is_interrupt exn then Exn.reraise exn
+      if Exn.is_interrupt_proper exn then Exn.reraise exn
       else raise Runtime.EXCURSION_FAIL (exn, info));
 
 val command = command_exception false;
@@ -733,7 +734,7 @@ fun future_proofs_enabled estimate st =
   (case try proof_of st of
     NONE => false
   | SOME state =>
-      not (Proofterm.proofs_enabled ()) andalso
+      not (Proofterm.any_proofs_enabled ()) andalso
       not (Proof.is_relevant state) andalso
        (if can (Proof.assert_bottom true) state
         then Future.proofs_enabled 1

@@ -141,7 +141,7 @@ fun make_ind ({descr, rec_names, rec_rewrites, induct, ...} : Old_Datatype_Aux.i
             (case head_of (strip_abs_body f) of
               Free (s, T) =>
                 let val T' = Logic.varifyT_global T in
-                  Abst (s, SOME T', Proofterm.prf_abstract_over
+                  Abst (s, SOME T', Proofterm.abstract_over
                     (Var ((s, 0), T')) (AbsP ("H", SOME p, prf)))
                 end
             | _ => AbsP ("H", SOME p, prf)))
@@ -227,7 +227,7 @@ fun make_casedists ({index, descr, case_name, case_rewrites, exhaust, ...} : Old
   end;
 
 fun add_dt_realizers config names thy =
-  if not (Proofterm.proofs_enabled ()) then thy
+  if not (Proofterm.proof_enabled (Proofterm.get_proofs_level ())) then thy
   else
     let
       val _ = Old_Datatype_Aux.message config "Adding realizers for induction and case analysis ...";

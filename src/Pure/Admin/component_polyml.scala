@@ -2,6 +2,8 @@
     Author:     Makarius
 
 Build Poly/ML from sources.
+
+Note: macOS 14 Sonoma requires "LDFLAGS=... -ld64".
 */
 
 package isabelle
@@ -60,7 +62,7 @@ object Component_PolyML {
       platform_info.getOrElse(platform.os_name,
         error("Bad OS platform: " + quote(platform.os_name)))
 
-    if (platform.is_linux) Isabelle_System.require_command("chrpath")
+    if (platform.is_linux) Isabelle_System.require_command("patchelf")
 
 
     /* bash */
@@ -154,11 +156,11 @@ object Component_PolyML {
   /** skeleton for component **/
 
   val default_polyml_url = "https://github.com/polyml/polyml/archive"
-  val default_polyml_version = "219e0a248f70"
-  val default_polyml_name = "polyml-5.9"
+  val default_polyml_version = "90c0dbb2514e"
+  val default_polyml_name = "polyml-5.9.1"
 
   val default_sha1_url = "https://isabelle.sketis.net/repos/sha1/archive"
-  val default_sha1_version = "e0239faa6f42"
+  val default_sha1_version = "0ce12663fe76"
 
   private def init_src_root(src_dir: Path, input: String, output: String): Unit = {
     val lines = split_lines(File.read(src_dir + Path.explode(input)))
@@ -282,6 +284,9 @@ This compilation of Poly/ML (https://www.polyml.org) is based on the
 source distribution from
 https://github.com/polyml/polyml/commit/""" + polyml_version + """
 
+This coincides with the official release of Poly/ML 5.9.1, see also
+https://github.com/polyml/polyml/releases/tag/v5.9.1
+
 The Isabelle repository provides an administrative tool "isabelle
 component_polyml", which can be used in the polyml component directory as
 follows:
@@ -306,8 +311,8 @@ will be placed in /usr/local).
 
 * Download:
 
-  $ curl https://gmplib.org/download/gmp/gmp-6.2.1.tar.bz2 | tar xjf -
-  $ cd gmp-6.2.1
+  $ curl https://gmplib.org/download/gmp/gmp-6.3.0.tar.bz2 | tar xjf -
+  $ cd gmp-6.3.0
 
 * build:
 

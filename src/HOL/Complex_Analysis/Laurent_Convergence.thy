@@ -4,102 +4,6 @@ theory Laurent_Convergence
 
 begin
 
-(* TODO: Move *)
-text \<open>TODO: Better than @{thm deriv_compose_linear}?\<close>
-lemma deriv_compose_linear':
-  assumes "f field_differentiable at (c * z+a)"
-  shows "deriv (\<lambda>w. f (c * w+a)) z = c * deriv f (c * z+a)"
-  apply (subst deriv_chain[where f="\<lambda>w. c * w+a",unfolded comp_def])
-  using assms by (auto intro:derivative_intros)
-
-text \<open>TODO: Better than @{thm higher_deriv_compose_linear}?\<close>
-lemma higher_deriv_compose_linear':
-  fixes z::complex
-  assumes f: "f holomorphic_on T" and S: "open S" and T: "open T" and z: "z \<in> S"
-      and fg: "\<And>w. w \<in> S \<Longrightarrow> u * w+c \<in> T"
-    shows "(deriv ^^ n) (\<lambda>w. f (u * w+c)) z = u^n * (deriv ^^ n) f (u * z+c)"
-using z
-proof (induction n arbitrary: z)
-  case 0 then show ?case by simp
-next
-  case (Suc n z)
-  have holo0: "f holomorphic_on (\<lambda>w. u * w+c) ` S"
-    by (meson fg f holomorphic_on_subset image_subset_iff)
-  have holo2: "(deriv ^^ n) f holomorphic_on (\<lambda>w. u * w+c) ` S"
-    by (meson f fg holomorphic_higher_deriv holomorphic_on_subset image_subset_iff T)
-  have holo3: "(\<lambda>z. u ^ n * (deriv ^^ n) f (u * z+c)) holomorphic_on S"
-    by (intro holo2 holomorphic_on_compose [where g="(deriv ^^ n) f", unfolded o_def] holomorphic_intros)
-  have "(\<lambda>w. u * w+c) holomorphic_on S" "f holomorphic_on (\<lambda>w. u * w+c) ` S"
-    by (rule holo0 holomorphic_intros)+
-  then have holo1: "(\<lambda>w. f (u * w+c)) holomorphic_on S"
-    by (rule holomorphic_on_compose [where g=f, unfolded o_def])
-  have "deriv ((deriv ^^ n) (\<lambda>w. f (u * w+c))) z = deriv (\<lambda>z. u^n * (deriv ^^ n) f (u*z+c)) z"
-  proof (rule complex_derivative_transform_within_open [OF _ holo3 S Suc.prems])
-    show "(deriv ^^ n) (\<lambda>w. f (u * w+c)) holomorphic_on S"
-      by (rule holomorphic_higher_deriv [OF holo1 S])
-  qed (simp add: Suc.IH)
-  also have "\<dots> = u^n * deriv (\<lambda>z. (deriv ^^ n) f (u * z+c)) z"
-  proof -
-    have "(deriv ^^ n) f analytic_on T"
-      by (simp add: analytic_on_open f holomorphic_higher_deriv T)
-    then have "(\<lambda>w. (deriv ^^ n) f (u * w+c)) analytic_on S"
-    proof -
-      have "(deriv ^^ n) f \<circ> (\<lambda>w. u * w+c) holomorphic_on S"
-        using holomorphic_on_compose[OF _ holo2] \<open>(\<lambda>w. u * w+c) holomorphic_on S\<close>
-        by simp
-      then show ?thesis
-        by (simp add: S analytic_on_open o_def)
-    qed
-    then show ?thesis
-      by (intro deriv_cmult analytic_on_imp_differentiable_at [OF _ Suc.prems])
-  qed
-  also have "\<dots> = u * u ^ n * deriv ((deriv ^^ n) f) (u * z+c)"
-  proof -
-    have "(deriv ^^ n) f field_differentiable at (u * z+c)"
-      using Suc.prems T f fg holomorphic_higher_deriv holomorphic_on_imp_differentiable_at by blast
-    then show ?thesis
-      by (simp add: deriv_compose_linear')
-  qed
-  finally show ?case
-    by simp
-qed
-
-lemma fps_to_fls_numeral [simp]: "fps_to_fls (numeral n) = numeral n"
-  by (metis fps_to_fls_of_nat of_nat_numeral)
-
-lemma fls_const_power: "fls_const (a ^ b) = fls_const a ^ b"
-  by (induction b) (auto simp flip: fls_const_mult_const)
-
-lemma fls_deriv_numeral [simp]: "fls_deriv (numeral n) = 0"
-  by (metis fls_deriv_of_int of_int_numeral)
-
-lemma fls_const_numeral [simp]: "fls_const (numeral n) = numeral n"
-  by (metis fls_of_nat of_nat_numeral)
-
-lemma fls_mult_of_int_nth [simp]:
-  shows "fls_nth (numeral k * f) n = numeral k * fls_nth f n"
-  and   "fls_nth (f * numeral k) n = fls_nth f n * numeral k"
-  by (metis fls_const_numeral fls_mult_const_nth)+
-
-lemma fls_nth_numeral' [simp]:
-  "fls_nth (numeral n) 0 = numeral n" "k \<noteq> 0 \<Longrightarrow> fls_nth (numeral n) k = 0"
-  by (subst fls_const_numeral [symmetric], subst fls_const_nth, simp)+
-
-lemma fls_subdegree_prod:
-  fixes F :: "'a \<Rightarrow> 'b :: field_char_0 fls"
-  assumes "\<And>x. x \<in> I \<Longrightarrow> F x \<noteq> 0"
-  shows   "fls_subdegree (\<Prod>x\<in>I. F x) = (\<Sum>x\<in>I. fls_subdegree (F x))"
-  using assms by (induction I rule: infinite_finite_induct) auto
-
-lemma fls_subdegree_prod':
-  fixes F :: "'a \<Rightarrow> 'b :: field_char_0 fls"
-  assumes "\<And>x. x \<in> I \<Longrightarrow> fls_subdegree (F x) \<noteq> 0"
-  shows   "fls_subdegree (\<Prod>x\<in>I. F x) = (\<Sum>x\<in>I. fls_subdegree (F x))"
-proof (intro fls_subdegree_prod)
-  show "F x \<noteq> 0" if "x \<in> I" for x
-    using assms[OF that] by auto
-qed
-
 instance fps :: (semiring_char_0) semiring_char_0
 proof
   show "inj (of_nat :: nat \<Rightarrow> 'a fps)"
@@ -116,14 +20,7 @@ qed
 instance fls :: (semiring_char_0) semiring_char_0
 proof
   show "inj (of_nat :: nat \<Rightarrow> 'a fls)"
-  proof
-    fix m n :: nat
-    assume "of_nat m = (of_nat n :: 'a fls)"
-    hence "fls_nth (of_nat m) 0 = (fls_nth (of_nat n) 0 :: 'a)"
-      by (simp only: )
-    thus "m = n"
-      by (simp add: fls_of_nat_nth)
-  qed
+    by (metis fls_regpart_of_nat injI of_nat_eq_iff)
 qed
 
 lemma fls_const_eq_0_iff [simp]: "fls_const c = 0 \<longleftrightarrow> c = 0"
@@ -547,20 +444,14 @@ lemma holomorphic_on_eval_fls' [holomorphic_intros]:
   assumes "g holomorphic_on A"
   assumes "g ` A \<subseteq> eball 0 (fls_conv_radius f) - (if fls_subdegree f \<ge> 0 then {} else {0})"
   shows   "(\<lambda>x. eval_fls f (g x)) holomorphic_on A"
-proof -
-  have "eval_fls f \<circ> g holomorphic_on A"
-    by (intro holomorphic_on_compose[OF assms(1) holomorphic_on_eval_fls]) (use assms in auto)
-  thus ?thesis
-    by (simp add: o_def)
-qed
+  by (meson assms holomorphic_on_compose holomorphic_on_eval_fls holomorphic_transform o_def)
 
 lemma continuous_on_eval_fls:
   fixes f
   defines "n \<equiv> fls_subdegree f"
   assumes "A \<subseteq> eball 0 (fls_conv_radius f) - (if n \<ge> 0 then {} else {0})"
   shows   "continuous_on A (eval_fls f)"
-  by (intro holomorphic_on_imp_continuous_on holomorphic_on_eval_fls)
-     (use assms in auto)
+  using assms holomorphic_on_eval_fls holomorphic_on_imp_continuous_on by blast
 
 lemma continuous_on_eval_fls' [continuous_intros]:
   fixes f
@@ -568,9 +459,7 @@ lemma continuous_on_eval_fls' [continuous_intros]:
   assumes "g ` A \<subseteq> eball 0 (fls_conv_radius f) - (if n \<ge> 0 then {} else {0})"
   assumes "continuous_on A g"
   shows   "continuous_on A (\<lambda>x. eval_fls f (g x))"
-  using assms(3)
-  by (intro continuous_on_compose2[OF continuous_on_eval_fls _ assms(2)])
-     (auto simp: n_def)
+  by (metis assms continuous_on_compose2 continuous_on_eval_fls order.refl)
 
 lemmas has_field_derivative_eval_fps' [derivative_intros] =
   DERIV_chain2[OF has_field_derivative_eval_fps]
@@ -621,7 +510,7 @@ qed
 lemma eval_fls_deriv:
   assumes "z \<in> eball 0 (fls_conv_radius F) - {0}"
   shows   "eval_fls (fls_deriv F) z = deriv (eval_fls F) z"
-  by (rule sym, rule DERIV_imp_deriv, rule has_field_derivative_eval_fls, rule assms)
+  by (metis DERIV_imp_deriv assms has_field_derivative_eval_fls)
 
 lemma analytic_on_eval_fls:
   assumes "A \<subseteq> eball 0 (fls_conv_radius f) - (if fls_subdegree f \<ge> 0 then {} else {0})"
@@ -781,8 +670,12 @@ lemma has_laurent_expansion_imp_is_pole:
 lemma is_pole_imp_neg_fls_subdegree:
   assumes F: "(\<lambda>x. f (z + x)) has_laurent_expansion F" and "is_pole f z"
   shows   "fls_subdegree F < 0"
-  apply (rule is_pole_0_imp_neg_fls_subdegree[OF F])
-  using assms(2) is_pole_shift_0 by blast
+proof -
+  have "is_pole (\<lambda>x. f (z + x)) 0"
+    using assms(2) is_pole_shift_0 by blast
+  then show ?thesis
+    using F is_pole_0_imp_neg_fls_subdegree by blast
+qed
 
 lemma is_pole_fls_subdegree_iff:
   assumes "(\<lambda>x. f (z + x)) has_laurent_expansion F"
@@ -2258,211 +2151,6 @@ next
     by simp
 qed
 
-hide_const (open) fls_compose_fps
-
-definition fls_compose_fps :: "'a :: field fls \<Rightarrow> 'a fps \<Rightarrow> 'a fls" where
-  "fls_compose_fps F G =
-     fps_to_fls (fps_compose (fls_base_factor_to_fps F) G) * fps_to_fls G powi fls_subdegree F"
-
-lemma fps_compose_of_nat [simp]: "fps_compose (of_nat n :: 'a :: comm_ring_1 fps) H = of_nat n"
-  and fps_compose_of_int [simp]: "fps_compose (of_int i) H = of_int i"
-  unfolding fps_of_nat [symmetric] fps_of_int [symmetric] numeral_fps_const
-  by (rule fps_const_compose)+
-
-lemmas [simp] = fps_to_fls_of_nat fps_to_fls_of_int
-
-lemma fls_compose_fps_0 [simp]: "fls_compose_fps 0 H = 0"
-  and fls_compose_fps_1 [simp]: "fls_compose_fps 1 H = 1"
-  and fls_compose_fps_const [simp]: "fls_compose_fps (fls_const c) H = fls_const c"
-  and fls_compose_fps_of_nat [simp]: "fls_compose_fps (of_nat n) H = of_nat n"
-  and fls_compose_fps_of_int [simp]: "fls_compose_fps (of_int i) H = of_int i"
-  and fls_compose_fps_X [simp]: "fls_compose_fps fls_X F = fps_to_fls F"
-  by (simp_all add: fls_compose_fps_def)
-
-lemma fls_compose_fps_0_right:
-  "fls_compose_fps F 0 = (if fls_subdegree F \<ge> 0 then fls_const (fls_nth F 0) else 0)"
-  by (cases "fls_subdegree F = 0") (simp_all add: fls_compose_fps_def)
-
-lemma fls_compose_fps_shift:
-  assumes "H \<noteq> 0"
-  shows   "fls_compose_fps (fls_shift n F) H = fls_compose_fps F H * fps_to_fls H powi (-n)"
-proof (cases "F = 0")
-  case False
-  thus ?thesis
-    using assms by (simp add: fls_compose_fps_def power_int_diff power_int_minus field_simps)
-qed auto
-
-lemma fls_compose_fps_to_fls [simp]:
-  assumes [simp]: "G \<noteq> 0" "fps_nth G 0 = 0"
-  shows   "fls_compose_fps (fps_to_fls F) G = fps_to_fls (fps_compose F G)"
-proof (cases "F = 0")
-  case False
-  define n where "n = subdegree F"
-  define F' where "F' = fps_shift n F"
-  have [simp]: "F' \<noteq> 0" "subdegree F' = 0"
-    using False by (auto simp: F'_def n_def)
-  have F_eq: "F = F' * fps_X ^ n"
-    unfolding F'_def n_def using subdegree_decompose by blast
-  have "fls_compose_fps (fps_to_fls F) G =
-          fps_to_fls (fps_shift n (fls_regpart (fps_to_fls F' * fls_X_intpow (int n))) oo G) * fps_to_fls (G ^ n)"
-    unfolding F_eq fls_compose_fps_def
-    by (simp add: fls_times_fps_to_fls fls_X_power_conv_shift_1 power_int_add
-                  fls_subdegree_fls_to_fps fps_to_fls_power fls_regpart_shift_conv_fps_shift
-             flip: fls_times_both_shifted_simp)
-  also have "fps_to_fls F' * fls_X_intpow (int n) = fps_to_fls F"
-    by (simp add: F_eq fls_times_fps_to_fls fps_to_fls_power fls_X_power_conv_shift_1)
-  also have "fps_to_fls (fps_shift n (fls_regpart (fps_to_fls F)) oo G) * fps_to_fls (G ^ n) =
-             fps_to_fls ((fps_shift n (fls_regpart (fps_to_fls F)) * fps_X ^ n) oo G)"
-    by (simp add: fls_times_fps_to_fls flip: fps_compose_power add: fps_compose_mult_distrib)
-  also have "fps_shift n (fls_regpart (fps_to_fls F)) * fps_X ^ n = F"
-    by (simp add: F_eq)
-  finally show ?thesis .
-qed (auto simp: fls_compose_fps_def)
-
-lemma fls_compose_fps_mult:
-  assumes [simp]: "H \<noteq> 0" "fps_nth H 0 = 0"
-  shows   "fls_compose_fps (F * G) H = fls_compose_fps F H * fls_compose_fps G H"
-  using assms
-proof (cases "F * G = 0")
-  case False
-  hence [simp]: "F \<noteq> 0" "G \<noteq> 0"
-    by auto
-  define n m where "n = fls_subdegree F" "m = fls_subdegree G"
-  define F' where "F' = fls_regpart (fls_shift n F)"
-  define G' where "G' = fls_regpart (fls_shift m G)"
-  have F_eq: "F = fls_shift (-n) (fps_to_fls F')" and G_eq: "G = fls_shift (-m) (fps_to_fls G')"
-    by (simp_all add: F'_def G'_def n_m_def)
-  have "fls_compose_fps (F * G) H = fls_compose_fps (fls_shift (-(n + m)) (fps_to_fls (F' * G'))) H"
-    by (simp add: fls_times_fps_to_fls F_eq G_eq fls_shifted_times_simps)
-  also have "\<dots> = fps_to_fls ((F' oo H) * (G' oo H)) * fps_to_fls H powi (m + n)"
-    by (simp add: fls_compose_fps_shift fps_compose_mult_distrib)
-  also have "\<dots> = fls_compose_fps F H * fls_compose_fps G H"
-    by (simp add: F_eq G_eq fls_compose_fps_shift fls_times_fps_to_fls power_int_add)
-  finally show ?thesis .
-qed auto
-
-lemma fls_compose_fps_power:
-  assumes [simp]: "G \<noteq> 0" "fps_nth G 0 = 0"
-  shows   "fls_compose_fps (F ^ n) G = fls_compose_fps F G ^ n"
-  by (induction n) (auto simp: fls_compose_fps_mult)
-
-lemma fls_compose_fps_add:
-  assumes [simp]: "H \<noteq> 0" "fps_nth H 0 = 0"
-  shows   "fls_compose_fps (F + G) H = fls_compose_fps F H + fls_compose_fps G H"
-proof (cases "F = 0 \<or> G = 0")
-  case False
-  hence [simp]: "F \<noteq> 0" "G \<noteq> 0"
-    by auto
-  define n where "n = min (fls_subdegree F) (fls_subdegree G)"
-  define F' where "F' = fls_regpart (fls_shift n F)"
-  define G' where "G' = fls_regpart (fls_shift n G)"
-  have F_eq: "F = fls_shift (-n) (fps_to_fls F')" and G_eq: "G = fls_shift (-n) (fps_to_fls G')"
-    unfolding n_def by (simp_all add: F'_def G'_def n_def)
-  have "F + G = fls_shift (-n) (fps_to_fls (F' + G'))"
-    by (simp add: F_eq G_eq)
-  also have "fls_compose_fps \<dots> H = fls_compose_fps (fps_to_fls (F' + G')) H * fps_to_fls H powi n"
-    by (subst fls_compose_fps_shift) auto
-  also have "\<dots> = fps_to_fls (fps_compose (F' + G') H) * fps_to_fls H powi n"
-    by (subst fls_compose_fps_to_fls) auto
-  also have "\<dots> = fls_compose_fps F H + fls_compose_fps G H"
-    by (simp add: F_eq G_eq fls_compose_fps_shift fps_compose_add_distrib algebra_simps)
-  finally show ?thesis .
-qed auto
-
-lemma fls_compose_fps_uminus [simp]: "fls_compose_fps (-F) H = -fls_compose_fps F H"
-  by (simp add: fls_compose_fps_def fps_compose_uminus)
-
-lemma fls_compose_fps_diff:
-  assumes [simp]: "H \<noteq> 0" "fps_nth H 0 = 0"
-  shows   "fls_compose_fps (F - G) H = fls_compose_fps F H - fls_compose_fps G H"
-  using fls_compose_fps_add[of H F "-G"] by simp
-
-lemma fps_compose_eq_0_iff:
-  fixes F G :: "'a :: idom fps"
-  assumes "fps_nth G 0 = 0"
-  shows "fps_compose F G = 0 \<longleftrightarrow> F = 0 \<or> (G = 0 \<and> fps_nth F 0 = 0)"
-proof safe
-  assume *: "fps_compose F G = 0" "F \<noteq> 0"
-  have "fps_nth (fps_compose F G) 0 = fps_nth F 0"
-    by simp
-  also have "fps_compose F G = 0"
-    by (simp add: *)
-  finally show "fps_nth F 0 = 0"
-    by simp
-  show "G = 0"
-  proof (rule ccontr)
-    assume "G \<noteq> 0"
-    hence "subdegree G > 0" using assms
-      using subdegree_eq_0_iff by blast
-    define N where "N = subdegree F * subdegree G"
-    have "fps_nth (fps_compose F G) N = (\<Sum>i = 0..N. fps_nth F i * fps_nth (G ^ i) N)"
-      unfolding fps_compose_def by (simp add: N_def)
-    also have "\<dots> = (\<Sum>i\<in>{subdegree F}. fps_nth F i * fps_nth (G ^ i) N)"
-    proof (intro sum.mono_neutral_right ballI)
-      fix i assume i: "i \<in> {0..N} - {subdegree F}"
-      show "fps_nth F i * fps_nth (G ^ i) N = 0"
-      proof (cases i "subdegree F" rule: linorder_cases)
-        assume "i > subdegree F"
-        hence "fps_nth (G ^ i) N = 0"
-          using i \<open>subdegree G > 0\<close> by (intro fps_pow_nth_below_subdegree) (auto simp: N_def)
-        thus ?thesis by simp
-      qed (use i in \<open>auto simp: N_def\<close>)
-    qed (use \<open>subdegree G > 0\<close> in \<open>auto simp: N_def\<close>)
-    also have "\<dots> = fps_nth F (subdegree F) * fps_nth (G ^ subdegree F) N"
-      by simp
-    also have "\<dots> \<noteq> 0"
-      using \<open>G \<noteq> 0\<close> \<open>F \<noteq> 0\<close> by (auto simp: N_def)
-    finally show False using * by auto
-  qed
-qed auto
-
-lemma fls_compose_fps_eq_0_iff:
-  assumes "H \<noteq> 0" "fps_nth H 0 = 0"
-  shows   "fls_compose_fps F H = 0 \<longleftrightarrow> F = 0"
-  using assms fls_base_factor_to_fps_nonzero[of F]
-  by (cases "F = 0") (auto simp: fls_compose_fps_def fps_compose_eq_0_iff)
-
-lemma fls_compose_fps_inverse:
-  assumes [simp]: "H \<noteq> 0" "fps_nth H 0 = 0"
-  shows   "fls_compose_fps (inverse F) H = inverse (fls_compose_fps F H)"
-proof (cases "F = 0")
-  case False
-  have "fls_compose_fps (inverse F) H * fls_compose_fps F H =
-        fls_compose_fps (inverse F * F) H"
-    by (subst fls_compose_fps_mult) auto
-  also have "inverse F * F = 1"
-    using False by simp
-  finally show ?thesis
-    using False by (simp add: field_simps fls_compose_fps_eq_0_iff)
-qed auto
-
-lemma fls_compose_fps_divide:
-  assumes [simp]: "H \<noteq> 0" "fps_nth H 0 = 0"
-  shows   "fls_compose_fps (F / G) H = fls_compose_fps F H / fls_compose_fps G H"
-  using fls_compose_fps_mult[of H F "inverse G"] fls_compose_fps_inverse[of H G]
-  by (simp add: field_simps)
-
-lemma fls_compose_fps_powi:
-  assumes [simp]: "H \<noteq> 0" "fps_nth H 0 = 0"
-  shows   "fls_compose_fps (F powi n) H = fls_compose_fps F H powi n"
-  by (simp add: power_int_def fls_compose_fps_power fls_compose_fps_inverse)
-
-lemma fls_compose_fps_assoc:
-  assumes [simp]: "G \<noteq> 0" "fps_nth G 0 = 0" "H \<noteq> 0" "fps_nth H 0 = 0"
-  shows "fls_compose_fps (fls_compose_fps F G) H = fls_compose_fps F (fps_compose G H)"
-proof (cases "F = 0")
-  case [simp]: False
-  define n where "n = fls_subdegree F"
-  define F' where "F' = fls_regpart (fls_shift n F)"
-  have F_eq: "F = fls_shift (-n) (fps_to_fls F')"
-    by (simp add: F'_def n_def)
-  show ?thesis
-    by (simp add: F_eq fls_compose_fps_shift fls_compose_fps_mult fls_compose_fps_powi
-                  fps_compose_eq_0_iff fps_compose_assoc)
-qed auto
-
-lemma subdegree_pos_iff: "subdegree F > 0 \<longleftrightarrow> F \<noteq> 0 \<and> fps_nth F 0 = 0"
-  using subdegree_eq_0_iff[of F] by auto
 
 lemma has_fps_expansion_fps_to_fls:
   assumes "f has_laurent_expansion fps_to_fls F"
@@ -2474,7 +2162,6 @@ proof -
   with assms show ?thesis
     by (auto simp: has_fps_expansion_to_laurent)
 qed
-
 
 lemma has_laurent_expansion_compose [laurent_expansion_intros]:
   fixes f g :: "complex \<Rightarrow> complex"
@@ -2526,34 +2213,6 @@ lemma has_laurent_expansion_fls_X_inv [laurent_expansion_intros]:
   using has_laurent_expansion_inverse[OF has_laurent_expansion_fps_X]
   by (simp add: fls_inverse_X)
 
-lemma fls_X_power_int [simp]: "fls_X powi n = (fls_X_intpow n :: 'a :: division_ring fls)"
-  by (auto simp: power_int_def fls_X_power_conv_shift_1 fls_inverse_X fls_inverse_shift
-           simp flip: fls_inverse_X_power)
-
-lemma fls_const_power_int: "fls_const (c powi n) = fls_const (c :: 'a :: division_ring) powi n"
-  by (auto simp: power_int_def fls_const_power fls_inverse_const)
-
-lemma fls_nth_fls_compose_fps_linear:
-  fixes c :: "'a :: field"
-  assumes [simp]: "c \<noteq> 0"
-  shows "fls_nth (fls_compose_fps F (fps_const c * fps_X)) n = fls_nth F n * c powi n"
-proof -
-  {
-    assume *: "n \<ge> fls_subdegree F"
-    hence "c ^ nat (n - fls_subdegree F) = c powi int (nat (n - fls_subdegree F))"
-      by (simp add: power_int_def)
-    also have "\<dots> * c powi fls_subdegree F = c powi (int (nat (n - fls_subdegree F)) + fls_subdegree F)"
-      using * by (subst power_int_add) auto
-    also have "\<dots> = c powi n"
-      using * by simp
-    finally have "c ^ nat (n - fls_subdegree F) * c powi fls_subdegree F = c powi n" .
-  }
-  thus ?thesis
-    by (simp add: fls_compose_fps_def fps_compose_linear fls_times_fps_to_fls power_int_mult_distrib
-                  fls_shifted_times_simps
-             flip: fls_const_power_int)
-qed
-
 lemma zorder_times_analytic:
   assumes "f analytic_on {z}" "g analytic_on {z}"
   assumes "eventually (\<lambda>z. f z * g z \<noteq> 0) (at z)"
@@ -2587,13 +2246,8 @@ proof -
     by auto
 qed
 
-lemma analytic_on_prod [analytic_intros]:
-  assumes "\<And>x. x \<in> A \<Longrightarrow> f x analytic_on B"
-  shows   "(\<lambda>z. \<Prod>x\<in>A. f x z) analytic_on B"
-  using assms by (induction A rule: infinite_finite_induct) (auto intro!: analytic_intros)
-
 lemma zorder_const [simp]: "c \<noteq> 0 \<Longrightarrow> zorder (\<lambda>_. c) z = 0"
-  by (intro zorder_eqI[where s = UNIV]) auto
+  by (intro zorder_eqI[where S = UNIV]) auto
 
 lemma zorder_prod_analytic:
   assumes "\<And>x. x \<in> A \<Longrightarrow> f x analytic_on {z}"
@@ -2613,12 +2267,7 @@ qed auto
 lemma zorder_eq_0I:
   assumes "g analytic_on {z}" "g z \<noteq> 0"
   shows   "zorder g z = 0"
-proof -
-  from assms obtain r where r: "r > 0" "g holomorphic_on ball z r"
-    unfolding analytic_on_def by blast
-  thus ?thesis using assms
-    by (intro zorder_eqI[of "ball z r" _ g]) auto
-qed
+  using analytic_at assms zorder_eqI by fastforce
 
 lemma zorder_pos_iff:
   assumes "f holomorphic_on A" "open A" "z \<in> A" "frequently (\<lambda>z. f z \<noteq> 0) (at z)"
@@ -2651,12 +2300,7 @@ qed
 lemma zorder_pos_iff':
   assumes "f analytic_on {z}" "frequently (\<lambda>z. f z \<noteq> 0) (at z)"
   shows   "zorder f z > 0 \<longleftrightarrow> f z = 0"
-proof -
-  from assms(1) obtain A where A: "open A" "{z} \<subseteq> A" "f holomorphic_on A"
-    unfolding analytic_on_holomorphic by auto
-  with zorder_pos_iff [OF A(3,1), of z] assms show ?thesis
-    by auto
-qed
+  using analytic_at assms zorder_pos_iff by blast
 
 lemma zorder_ge_0:
   assumes "f analytic_on {z}" "frequently (\<lambda>z. f z \<noteq> 0) (at z)"
@@ -2673,15 +2317,7 @@ qed
 lemma zorder_eq_0_iff:
   assumes "f analytic_on {z}" "frequently (\<lambda>w. f w \<noteq> 0) (at z)"
   shows   "zorder f z = 0 \<longleftrightarrow> f z \<noteq> 0"
-proof
-  assume "f z \<noteq> 0"
-  thus "zorder f z = 0"
-    using assms zorder_eq_0I by blast
-next
-  assume "zorder f z = 0"
-  thus "f z \<noteq> 0"
-    using assms zorder_pos_iff' by fastforce
-qed
+  using assms zorder_eq_0I zorder_pos_iff' by fastforce
 
 lemma dist_mult_left:
   "dist (a * b) (a * c :: 'a :: real_normed_field) = norm a * dist b c"
@@ -2835,15 +2471,7 @@ proof -
 qed
 
 lemma fps_to_fls_eq_fls_const_iff [simp]: "fps_to_fls F = fls_const c \<longleftrightarrow> F = fps_const c"
-proof
-  assume "F = fps_const c"
-  thus "fps_to_fls F = fls_const c"
-    by simp
-next
-  assume "fps_to_fls F = fls_const c"
-  thus "F = fps_const c"
-    by (metis fls_regpart_const fls_regpart_fps_trivial)
-qed
+  using fps_to_fls_eq_iff by fastforce
 
 lemma zorder_compose':
   assumes "isolated_singularity_at f (g z)" "not_essential f (g z)"
@@ -2889,7 +2517,6 @@ proof -
     by (auto simp: eq_commute)
 qed
 
-
 lemma has_laurent_expansion_sin' [laurent_expansion_intros]:
   "sin has_laurent_expansion fps_to_fls (fps_sin 1)"
   using has_fps_expansion_sin' has_fps_expansion_to_laurent by blast
@@ -2913,5 +2540,45 @@ lemma has_laurent_expansion_tan' [laurent_expansion_intros]:
 lemma has_laurent_expansion_tan [laurent_expansion_intros]:
   "(\<lambda>z. tan (c * z)) has_laurent_expansion fps_to_fls (fps_tan c)"
   by (intro has_laurent_expansion_fps has_fps_expansion_tan)
+
+subsection \<open>More Laurent expansions\<close>
+
+lemma has_laurent_expansion_frequently_zero_iff:
+  assumes "(\<lambda>w. f (z + w)) has_laurent_expansion F"
+  shows   "frequently (\<lambda>z. f z = 0) (at z) \<longleftrightarrow> F = 0"
+  using assms by (simp add: frequently_def has_laurent_expansion_eventually_nonzero_iff)
+
+lemma has_laurent_expansion_eventually_zero_iff:
+  assumes "(\<lambda>w. f (z + w)) has_laurent_expansion F"
+  shows   "eventually (\<lambda>z. f z = 0) (at z) \<longleftrightarrow> F = 0"
+  using assms
+  by (metis has_laurent_expansion_frequently_zero_iff has_laurent_expansion_isolated 
+            has_laurent_expansion_not_essential laurent_expansion_def 
+            not_essential_frequently_0_imp_eventually_0 not_essential_has_laurent_expansion)
+
+lemma has_laurent_expansion_frequently_nonzero_iff:
+  assumes "(\<lambda>w. f (z + w)) has_laurent_expansion F"
+  shows   "frequently (\<lambda>z. f z \<noteq> 0) (at z) \<longleftrightarrow> F \<noteq> 0"
+  using assms by (metis has_laurent_expansion_eventually_zero_iff not_eventually)
+
+lemma has_laurent_expansion_sum_list [laurent_expansion_intros]:
+  assumes "\<And>x. x \<in> set xs \<Longrightarrow> f x has_laurent_expansion F x"
+  shows   "(\<lambda>y. \<Sum>x\<leftarrow>xs. f x y) has_laurent_expansion (\<Sum>x\<leftarrow>xs. F x)"
+  using assms by (induction xs) (auto intro!: laurent_expansion_intros)
+
+lemma has_laurent_expansion_prod_list [laurent_expansion_intros]:
+  assumes "\<And>x. x \<in> set xs \<Longrightarrow> f x has_laurent_expansion F x"
+  shows   "(\<lambda>y. \<Prod>x\<leftarrow>xs. f x y) has_laurent_expansion (\<Prod>x\<leftarrow>xs. F x)"
+  using assms by (induction xs) (auto intro!: laurent_expansion_intros)
+
+lemma has_laurent_expansion_sum_mset [laurent_expansion_intros]:
+  assumes "\<And>x. x \<in># I \<Longrightarrow> f x has_laurent_expansion F x"
+  shows   "(\<lambda>y. \<Sum>x\<in>#I. f x y) has_laurent_expansion (\<Sum>x\<in>#I. F x)"
+  using assms by (induction I) (auto intro!: laurent_expansion_intros)
+
+lemma has_laurent_expansion_prod_mset [laurent_expansion_intros]:
+  assumes "\<And>x. x \<in># I \<Longrightarrow> f x has_laurent_expansion F x"
+  shows   "(\<lambda>y. \<Prod>x\<in>#I. f x y) has_laurent_expansion (\<Prod>x\<in>#I. F x)"
+  using assms by (induction I) (auto intro!: laurent_expansion_intros)
 
 end

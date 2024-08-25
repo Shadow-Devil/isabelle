@@ -11,11 +11,12 @@ this is assured because both have type "prop".
 
 signature UNIFY =
 sig
-  val trace_bound: int Config.T
   val search_bound: int Config.T
-  val trace_simp: bool Config.T
-  val trace_types: bool Config.T
-  val hounifiers: Context.generic * Envir.env * ((term * term) list) ->
+  val unify_trace: bool Config.T
+  val unify_trace_bound: int Config.T
+  val unify_trace_simp: bool Config.T
+  val unify_trace_types: bool Config.T
+  val hounifiers: (string * typ) list -> Context.generic * Envir.env * ((term * term) list) ->
     (Envir.env * (term * term) list) Seq.seq
   val unifiers: Context.generic * Envir.env * ((term * term) list) ->
     (Envir.env * (term * term) list) Seq.seq
@@ -27,17 +28,27 @@ struct
 
 (*Unification options*)
 
-(*tracing starts above this depth, 0 for full*)
-val trace_bound = Config.declare_int ("unify_trace_bound", \<^here>) (K 50);
-
 (*unification quits above this depth*)
 val search_bound = Config.declare_int ("unify_search_bound", \<^here>) (K 60);
 
+
+(* diagnostics *)
+
+val unify_trace = Config.declare_bool ("unify_trace", \<^here>) (K false);
+
+(*tracing starts above this depth, 0 for full*)
+val unify_trace_bound = Config.declare_int ("unify_trace_bound", \<^here>) (K 50);
+
 (*print dpairs before calling SIMPL*)
-val trace_simp = Config.declare_bool ("unify_trace_simp", \<^here>) (K false);
+val unify_trace_simp = Config.declare_bool ("unify_trace_simp", \<^here>) (K false);
 
 (*announce potential incompleteness of type unification*)
-val trace_types = Config.declare_bool ("unify_trace_types", \<^here>) (K false);
+val unify_trace_types = Config.declare_bool ("unify_trace_types", \<^here>) (K false);
+
+fun cond_tracing ctxt msg =
+  if Config.get_generic ctxt unify_trace andalso Context_Position.is_visible_generic ctxt then
+    tracing (msg ())
+  else ();
 
 
 type binderlist = (string * typ) list;
@@ -68,7 +79,7 @@ fun eta_norm env =
 (*OCCURS CHECK
   Does the uvar occur in the term t?
   two forms of search, for whether there is a rigid path to the current term.
-  "seen" is list of variables passed thru, is a memo variable for sharing.
+  "seen" is list of variables passed through, is a memo variable for sharing.
   This version searches for nonrigid occurrence, returns true if found.
   Since terms may contain variables with same name and different types,
   the occurs check must ignore the types of variables. This avoids
@@ -178,13 +189,11 @@ fun unify_types context TU env =
 
 fun test_unify_types context (T, U) env =
   let
-    fun trace () =
-      if Context_Position.is_visible_generic context then
-        let val str_of = Syntax.string_of_typ (Context.proof_of context)
-        in tracing ("Potential loss of completeness: " ^ str_of U ^ " = " ^ str_of T) end
-      else ();
+    fun msg () =
+      let val str_of = Syntax.string_of_typ (Context.proof_of context)
+      in "Potential loss of completeness: " ^ str_of U ^ " = " ^ str_of T end
     val env' = unify_types context (T, U) env;
-  in if is_TVar T orelse is_TVar U then trace () else (); env' end;
+  in if is_TVar T orelse is_TVar U then cond_tracing context msg else (); env' end;
 
 (*Is the term eta-convertible to a single variable with the given rbinder?
   Examples: ?a   ?f(B.0)   ?g(B.1,B.0)
@@ -325,7 +334,7 @@ fun matchcopy context vname =
   let
     fun mc (rbinder, targs, u, ed as (env, dpairs)) : (term * (Envir.env * dpair list)) Seq.seq =
       let
-        val trace_types = Config.get_generic context trace_types;
+        val unify_trace_types = Config.get_generic context unify_trace_types;
         (*Produce copies of uarg and cons them in front of uargs*)
         fun copycons uarg (uargs, (env, dpairs)) =
           Seq.map (fn (uarg', ed') => (uarg' :: uargs, ed'))
@@ -342,7 +351,7 @@ fun matchcopy context vname =
         fun projenv (head, (Us, bary), targ, tail) =
           let
             val env =
-              if trace_types then test_unify_types context (base, bary) env
+              if unify_trace_types then test_unify_types context (base, bary) env
               else unify_types context (base, bary) env
           in
             Seq.make (fn () =>
@@ -565,32 +574,34 @@ fun add_ffpair context (rbinder,t0,u0) (env,tpairs) : Envir.env * (term * term) 
   In t \<equiv> u print u first because it may be rigid or flexible --
     t is always flexible.*)
 fun print_dpairs context msg (env, dpairs) =
-  if Context_Position.is_visible_generic context then
-    let
-      fun pdp (rbinder, t, u) =
-        let
-          val ctxt = Context.proof_of context;
-          fun termT t =
-            Syntax.pretty_term ctxt (Envir.norm_term env (Logic.rlist_abs (rbinder, t)));
-          val prt = Pretty.blk (0, [termT u, Pretty.str " \<equiv>\<^sup>?", Pretty.brk 1, termT t]);
-        in tracing (Pretty.string_of prt) end;
-    in tracing msg; List.app pdp dpairs end
-  else ();
+  let
+    fun pdp (rbinder, t, u) =
+      let
+        val ctxt = Context.proof_of context;
+        fun termT t =
+          Syntax.pretty_term ctxt (Envir.norm_term env (Logic.rlist_abs (rbinder, t)));
+        val prt = Pretty.blk (0, [termT u, Pretty.str " \<equiv>\<^sup>?", Pretty.brk 1, termT t]);
+      in Pretty.string_of prt end;
+  in
+    cond_tracing context (fn () => msg);
+    List.app (fn dp => cond_tracing context (fn () => pdp dp)) dpairs
+  end;
 
 
 (*Unify the dpairs in the environment.
   Returns flex-flex disagreement pairs NOT IN normal form.
   SIMPL may raise exception CANTUNIFY. *)
-fun hounifiers (context, env, tus : (term * term) list) : (Envir.env * (term * term) list) Seq.seq =
+fun hounifiers binders (context, env, tus : (term * term) list)
+  : (Envir.env * (term * term) list) Seq.seq =
   let
-    val trace_bound = Config.get_generic context trace_bound;
+    val unify_trace_bound = Config.get_generic context unify_trace_bound;
+    val unify_trace_simp = Config.get_generic context unify_trace_simp;
     val search_bound = Config.get_generic context search_bound;
-    val trace_simp = Config.get_generic context trace_simp;
     fun add_unify tdepth ((env, dpairs), reseq) =
       Seq.make (fn () =>
         let
           val (env', flexflex, flexrigid) =
-           (if tdepth > trace_bound andalso trace_simp
+           (if tdepth > unify_trace_bound andalso unify_trace_simp
             then print_dpairs context "Enter SIMPL" (env, dpairs) else ();
             SIMPL context (env, dpairs));
         in
@@ -598,26 +609,27 @@ fun hounifiers (context, env, tus : (term * term) list) : (Envir.env * (term * t
             [] => SOME (fold_rev (add_ffpair context) flexflex (env', []), reseq)
           | dp :: frigid' =>
               if tdepth > search_bound then
-                (if Context_Position.is_visible_generic context
-                 then warning "Unification bound exceeded" else (); Seq.pull reseq)
+                (if Context_Position.is_visible_generic context then
+                   warning "Unification bound exceeded -- see unify trace for details"
+                 else (); Seq.pull reseq)
               else
-               (if tdepth > trace_bound then
+               (if tdepth > unify_trace_bound then
                   print_dpairs context "Enter MATCH" (env',flexrigid@flexflex)
                 else ();
                 Seq.pull (Seq.it_right
                     (add_unify (tdepth + 1)) (MATCH context (env',dp, frigid'@flexflex), reseq))))
         end
         handle CANTUNIFY =>
-         (if tdepth > trace_bound andalso Context_Position.is_visible_generic context
-          then tracing "Failure node"
+         (if tdepth > unify_trace_bound
+          then cond_tracing context (fn () => "Failure node")
           else (); Seq.pull reseq));
-    val dps = map (fn (t, u) => ([], t, u)) tus;
+    val dps = map (fn (t, u) => (binders, t, u)) tus;
   in add_unify 1 ((env, dps), Seq.empty) end;
 
 fun unifiers (params as (context, env, tus)) =
   Seq.cons (fold (Pattern.unify context) tus env, []) Seq.empty
     handle Pattern.Unif => Seq.empty
-      | Pattern.Pattern => hounifiers params;
+      | Pattern.Pattern => hounifiers [] params;
 
 
 (*For smash_flexflex1*)

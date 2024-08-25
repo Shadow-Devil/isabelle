@@ -90,7 +90,7 @@ option print_mode : string = "" for content
 section "Parallel Processing and Timing"
 
 public option threads : int = 0 for build
-  -- "maximum number of worker threads for prover process (0 = hardware max.)"
+  -- "maximum number of worker threads for prover process (0 = guess from hardware)"
 option threads_trace : int = 0
   -- "level of tracing information for multithreading"
 option threads_stack_limit : real = 0.25
@@ -144,7 +144,7 @@ option condition : string = "" for content
 option timeout : real = 0 for build
   -- "timeout for session build job (seconds > 0)"
 
-option timeout_build : bool = true for build
+option timeout_build : bool = true for build build_sync
   -- "observe timeout for session build"
 
 option process_policy : string = ""
@@ -177,7 +177,7 @@ public option ML_exception_debugger : bool = false
 public option ML_debugger : bool = false
   -- "ML debugger instrumentation for newly compiled code"
 
-public option ML_system_64 : bool = false for build
+public option ML_system_64 : bool = false for build build_sync
   -- "prefer native 64bit platform (change requires restart)"
 
 public option ML_system_apple : bool = true for build
@@ -192,26 +192,44 @@ option build_thorough : bool = false
 option build_hostname : string = ""
   -- "alternative hostname for build process (default $ISABELLE_HOSTNAME)"
 
-option build_engine : string = ""
+option build_engine : string = "" for build_sync
   -- "alternative session build engine"
 
-option build_database : bool = false
+option build_database : bool = false for build_sync
   -- "expose state of build process via central database"
 
-option build_database_slice : real = 300
+option build_database_slice : real = 300 for build_sync
   -- "slice size in MiB for ML heap stored within database"
 
 option build_delay : real = 0.2
   -- "delay build process main loop (local)"
 
-option build_cluster_delay : real = 1.0
-  -- "delay build process main loop (cluster)"
+option build_delay_master : real = 1.0
+  -- "delay build process main loop (cluster master)"
+
+option build_delay_worker : real = 0.5
+  -- "delay build process main loop (cluster worker)"
+
+option build_cluster_expire : int = 50
+  -- "enforce database synchronization after given number of delay loops"
 
 option build_cluster_root : string = "$USER_HOME/.isabelle/build_cluster"
   -- "root directory for remote build cluster sessions"
 
 option build_cluster_identifier : string = "build_cluster"
   -- "ISABELLE_IDENTIFIER for remote build cluster sessions"
+
+option build_benchmark_session : string = "FOLP-ex"
+  -- "representative benchmark session with short build time and requirements"
+
+option build_schedule : string = ""
+  -- "path to pre-computed schedule"
+
+option build_schedule_initial : string = ""
+  -- "path to initial pre-computed schedule (may be overwritten during build)"
+
+option build_schedule_outdated_delay : real = 300.0
+  -- "delay schedule generation loop"
 
 
 section "Editor Session"
@@ -273,10 +291,10 @@ option editor_syslog_limit : int = 100
 
 section "Headless Session"
 
-option headless_consolidate_delay : real = 15
+option headless_consolidate_delay : real = 2.0
   -- "delay to consolidate status of command evaluation (execution forks)"
 
-option headless_prune_delay : real = 60
+option headless_prune_delay : real = 30
   -- "delay to prune history (delete old versions)"
 
 option headless_check_delay : real = 0.5
@@ -351,10 +369,10 @@ public option ssh_alive_count_max : int = 3
 
 section "Phabricator"
 
-option phabricator_version_arcanist : string = "4f70fcffa8a5393e210d64f237ffdaa256256d6a"
+option phabricator_version_arcanist : string = "e46025f7a9146f9918bab9d6fbdf6ed1816db5b5"
   -- "repository version for arcanist"
 
-option phabricator_version_phabricator : string = "193798385bd3a7f72dca255e44f8112f4f8fc155"
+option phabricator_version_phabricator : string = "2ba2cbaf9bbf8f88e910d3da0a3cd643e4879e8a"
   -- "repository version for phabricator"
 
 
@@ -393,7 +411,7 @@ option update_cite : bool = false for content update
 
 section "Build Database"
 
-option build_database_server : bool = false for connection
+option build_database_server : bool = false for connection build_sync
 option build_database_user : string = "" for connection
 option build_database_password : string = "" for connection
 option build_database_name : string = "" for connection
@@ -402,8 +420,6 @@ option build_database_port : int = 0 for connection
 option build_database_ssh_host : string = "" for connection
 option build_database_ssh_user : string = "" for connection
 option build_database_ssh_port : int = 0 for connection
-option build_database_synchronous_commit : string = "off" (standard "on") for connection
-  -- "see https://www.postgresql.org/docs/current/runtime-config-wal.html#GUC-SYNCHRONOUS-COMMIT"
 
 
 section "Build Log Database"
@@ -416,10 +432,12 @@ option build_log_database_port : int = 0 for connection
 option build_log_ssh_host : string = "" for connection
 option build_log_ssh_user : string = "" for connection
 option build_log_ssh_port : int = 0 for connection
-option build_log_history : int = 30  -- "length of relevant history (in days)"
-option build_log_transaction_size : int = 1  -- "number of log files for each db update"
-option build_log_database_synchronous_commit : string = "off" (standard "on") for connection
-  -- "see https://www.postgresql.org/docs/current/runtime-config-wal.html#GUC-SYNCHRONOUS-COMMIT"
+
+option build_log_history : int = 30
+  -- "length of relevant history (in days)"
+
+option build_log_verbose : bool = false for build_sync
+  -- "extra verbosity for build log database"
 
 
 section "Isabelle/Scala/ML system channel"
@@ -433,3 +451,12 @@ section "Bash process execution server"
 option bash_process_debugging : bool = false for connection
 option bash_process_address : string = "" for connection
 option bash_process_password : string = "" for connection
+
+
+section "Continuous integration"
+
+option ci_mail_user : string = "" for connection
+option ci_mail_password : string = "" for connection
+option ci_mail_sender : string = "" for connection
+option ci_mail_smtp_host : string = "" for connection
+option ci_mail_smtp_port : int = 587 for connection

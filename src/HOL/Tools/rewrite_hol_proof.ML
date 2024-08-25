@@ -310,8 +310,8 @@ fun strip_cong ps (PThm ({name = "HOL.cong", ...}, _) % _ % _ % SOME x % SOME y 
   | strip_cong ps (PThm ({name = "HOL.refl", ...}, _) % SOME f %% _) = SOME (f, ps)
   | strip_cong _ _ = NONE;
 
-val subst_prf = fst (Proofterm.strip_combt (fst (Proofterm.strip_combP (Thm.proof_of @{thm subst}))));
-val sym_prf = fst (Proofterm.strip_combt (fst (Proofterm.strip_combP (Thm.proof_of@{thm sym}))));
+val subst_prf = Proofterm.any_head_of (Thm.proof_of @{thm subst});
+val sym_prf = Proofterm.any_head_of (Thm.proof_of @{thm sym});
 
 fun make_subst Ts prf xs (_, []) = prf
   | make_subst Ts prf xs (f, ((x, y), (prf', clprf)) :: ps) =
@@ -334,13 +334,13 @@ fun elim_cong_aux Ts (PThm ({name = "HOL.iffD1", ...}, _) % _ % _ %% prf1 %% prf
       Option.map (make_subst Ts prf2 []) (strip_cong [] prf1)
   | elim_cong_aux Ts (PThm ({name = "HOL.iffD1", ...}, _) % P % _ %% prf) =
       Option.map (mk_AbsP P o make_subst Ts (PBound 0) [])
-        (strip_cong [] (Proofterm.incr_pboundvars 1 0 prf))
+        (strip_cong [] (Proofterm.incr_boundvars 1 0 prf))
   | elim_cong_aux Ts (PThm ({name = "HOL.iffD2", ...}, _) % _ % _ %% prf1 %% prf2) =
       Option.map (make_subst Ts prf2 [] o
         apsnd (map (make_sym Ts))) (strip_cong [] prf1)
   | elim_cong_aux Ts (PThm ({name = "HOL.iffD2", ...}, _) % _ % P %% prf) =
       Option.map (mk_AbsP P o make_subst Ts (PBound 0) [] o
-        apsnd (map (make_sym Ts))) (strip_cong [] (Proofterm.incr_pboundvars 1 0 prf))
+        apsnd (map (make_sym Ts))) (strip_cong [] (Proofterm.incr_boundvars 1 0 prf))
   | elim_cong_aux _ _ = NONE;
 
 fun elim_cong Ts hs prf = Option.map (rpair Proofterm.no_skel) (elim_cong_aux Ts prf);

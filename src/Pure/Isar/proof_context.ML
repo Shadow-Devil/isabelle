@@ -20,7 +20,7 @@ sig
   val get_mode: Proof.context -> mode
   val restore_mode: Proof.context -> Proof.context -> Proof.context
   val abbrev_mode: Proof.context -> bool
-  val syn_of: Proof.context -> Syntax.syntax
+  val syntax_of: Proof.context -> Syntax.syntax
   val tsig_of: Proof.context -> Type.tsig
   val set_defsort: sort -> Proof.context -> Proof.context
   val default_sort: Proof.context -> indexname -> sort
@@ -312,10 +312,9 @@ val get_mode = #mode o rep_data;
 val restore_mode = set_mode o get_mode;
 val abbrev_mode = get_mode #> (fn Mode {abbrev, ...} => abbrev);
 
-val syntax_of = #syntax o rep_data;
-val syn_of = Local_Syntax.syn_of o syntax_of;
+val syntax_of = Local_Syntax.syntax_of o #syntax o rep_data;
 val set_syntax_mode = map_syntax o Local_Syntax.set_mode;
-val restore_syntax_mode = map_syntax o Local_Syntax.restore_mode o syntax_of;
+val restore_syntax_mode = map_syntax o Local_Syntax.restore_mode o #syntax o rep_data;
 
 val tsig_of = #1 o #tsig o rep_data;
 val set_defsort = map_tsig o apfst o Type.set_defsort;
@@ -495,7 +494,7 @@ val read_typ_abbrev = read_typ_mode Type.mode_abbrev;
 
 
 fun cert_typ_mode mode ctxt T =
-  Type.cert_typ_mode mode (tsig_of ctxt) T
+  Type.certify_typ mode (tsig_of ctxt) T
     handle TYPE (msg, _, _) => error msg;
 
 val cert_typ = cert_typ_mode Type.mode_default;
@@ -533,13 +532,10 @@ fun check_type_name {proper, strict} ctxt (c, pos) =
   else
     let
       val ((d, reports), decl) = Type.check_decl (Context.Proof ctxt) (tsig_of ctxt) (c, pos);
-      fun err () = error ("Bad type name: " ^ quote d ^ Position.here pos);
-      val args =
-        (case decl of
-          Type.LogicalType n => n
-        | Type.Abbreviation (vs, _, _) => if strict then err () else length vs
-        | Type.Nonterminal => if strict then err () else 0);
-    in (Type (d, replicate args dummyT), reports) end;
+      val _ =
+        if strict andalso not (Type.decl_logical decl)
+        then error ("Bad type name: " ^ quote d ^ Position.here pos) else ();
+    in (Type (d, replicate (Type.decl_args decl) dummyT), reports) end;
 
 fun read_type_name flags ctxt text =
   let
@@ -584,7 +580,7 @@ fun check_const {proper, strict} ctxt (c, ps) =
     val _ =
       (case (strict, t) of
         (true, Const (d, _)) =>
-          (ignore (Consts.the_const consts d) handle TYPE (msg, _, _) => err msg)
+          (ignore (Consts.the_const_type consts d) handle TYPE (msg, _, _) => err msg)
       | _ => ());
   in (t, reports) end;
 
@@ -629,8 +625,8 @@ val read_term_abbrev    = read_term_mode mode_abbrev;
 local
 
 fun certify_consts ctxt =
-  Consts.certify (Context.Proof ctxt) (tsig_of ctxt)
-    (not (abbrev_mode ctxt)) (consts_of ctxt);
+  Consts.certify {normalize = not (abbrev_mode ctxt)}
+    (Context.Proof ctxt) (tsig_of ctxt) (consts_of ctxt);
 
 fun expand_binds ctxt =
   let
@@ -700,7 +696,8 @@ fun prepare_patterns ctxt =
   let val Mode {pattern, ...} = get_mode ctxt in
     Type_Infer.fixate ctxt pattern #>
     pattern ? Variable.polymorphic ctxt #>
-    (map o Term.map_types) (prepare_patternT ctxt) #>
+    (Same.commit o Same.map o Term.map_types_same)
+      (Same.function_eq (op =) (prepare_patternT ctxt)) #>
     (if pattern then prepare_dummies else map (check_dummies ctxt))
   end;
 
@@ -772,27 +769,28 @@ fun prepare_sorts_env ctxt tys =
 
   in (map #2 reports, get_sort) end;
 
-fun replace_sortsT get_sort =
-  map_atyps
+fun replace_sortsT_same get_sort =
+  Term.map_atyps_same
     (fn T =>
-      if Term_Position.is_positionT T then T
+      if Term_Position.is_positionT T then raise Same.SAME
       else
         (case T of
-          TFree (x, raw_S) => TFree (x, get_sort (x, ~1) raw_S)
-        | TVar (xi, raw_S) => TVar (xi, get_sort xi raw_S)
-        | _ => T));
+          TFree (x, raw_S) => TFree (x, Same.function_eq (op =) (get_sort (x, ~1)) raw_S)
+        | TVar (xi, raw_S) => TVar (xi, Same.function_eq (op =) (get_sort xi) raw_S)
+        | _ => raise Same.SAME));
 
 in
 
 fun prepare_sortsT ctxt tys =
   let val (sorting_report, get_sort) = prepare_sorts_env ctxt tys
-  in (sorting_report, map (replace_sortsT get_sort) tys) end;
+  in (sorting_report, (Same.commit o Same.map) (replace_sortsT_same get_sort) tys) end;
 
 fun prepare_sorts ctxt tms =
   let
     val tys = rev ((fold o fold_types) cons tms []);
     val (sorting_report, get_sort) = prepare_sorts_env ctxt tys;
-  in (sorting_report, (map o map_types) (replace_sortsT get_sort) tms) end;
+    val tms' = (Same.commit o Same.map o Term.map_types_same) (replace_sortsT_same get_sort) tms;
+  in (sorting_report, tms') end;
 
 fun check_tfree ctxt v =
   let
@@ -807,17 +805,16 @@ end;
 
 local
 
-fun gen_cert prop ctxt t =
-  t
-  |> expand_abbrevs ctxt
-  |> (fn t' =>
-      #1 (Sign.certify' prop (Context.Proof ctxt) false (consts_of ctxt) (theory_of ctxt) t')
-        handle TYPE (msg, _, _) => error msg | TERM (msg, _) => error msg);
+fun cert_flags flags ctxt t =
+  let val t' = expand_abbrevs ctxt t in
+    #1 (Sign.certify_flags flags (Context.Proof ctxt) (consts_of ctxt) (theory_of ctxt) t')
+      handle TYPE (msg, _, _) => error msg | TERM (msg, _) => error msg
+  end;
 
 in
 
-val cert_term = gen_cert false;
-val cert_prop = gen_cert true;
+val cert_term = cert_flags {prop = false, normalize = false};
+val cert_prop = cert_flags {prop = true, normalize = false};
 
 end;
 
@@ -1035,13 +1032,13 @@ fun add_facts {index} arg ctxt = ctxt
 fun update_facts flags (b, SOME ths) ctxt = ctxt |> add_facts flags (b, Lazy.value ths) |> #2
   | update_facts _ (b, NONE) ctxt = ctxt |> map_facts (Facts.del (full_name ctxt b));
 
-fun bind_name ctxt b = (full_name ctxt b, Binding.default_pos_of b);
+fun full_name_pos ctxt b = (full_name ctxt b, Binding.default_pos_of b);
 
 in
 
 fun add_thms_lazy kind (b, ths) ctxt =
   let
-    val name_pos = bind_name ctxt b;
+    val name_pos = full_name_pos ctxt b;
     val ths' =
       Global_Theory.check_thms_lazy ths
       |> Lazy.map_finished
@@ -1051,15 +1048,14 @@ fun add_thms_lazy kind (b, ths) ctxt =
 
 fun note_thms kind ((b, more_atts), facts) ctxt =
   let
-    val (name, pos) = bind_name ctxt b;
-    val facts' = facts
-      |> Global_Theory.burrow_fact (Global_Theory.name_thms Global_Theory.unofficial1 (name, pos));
-    fun app (ths, atts) =
-      fold_map (Thm.proof_attributes (surround (Thm.kind kind) (atts @ more_atts))) ths;
-    val (res, ctxt') = fold_map app facts' ctxt;
-    val thms = Global_Theory.name_thms Global_Theory.unofficial2 (name, pos) (flat res);
-    val (_, ctxt'') = ctxt' |> add_facts {index = is_stmt ctxt} (b, Lazy.value thms);
-  in ((name, thms), ctxt'') end;
+    val name_pos = full_name_pos ctxt b;
+    fun app_fact (thms, atts) =
+      fold_map (Thm.proof_attributes (surround (Thm.kind kind) (atts @ more_atts))) thms;
+    val (thms', ctxt') =
+      fold_maps app_fact (Global_Theory.name_facts Global_Theory.unofficial1 name_pos facts) ctxt;
+    val thms'' = Global_Theory.name_thms Global_Theory.unofficial2 name_pos thms';
+    val (_, ctxt'') = ctxt' |> add_facts {index = is_stmt ctxt} (b, Lazy.value thms'');
+  in ((#1 name_pos, thms''), ctxt'') end;
 
 val note_thmss = fold_map o note_thms;
 
@@ -1127,7 +1123,7 @@ end;
 (* syntax *)
 
 fun check_syntax_const ctxt (c, pos) =
-  if is_some (Syntax.lookup_const (syn_of ctxt) c) then c
+  if is_some (Syntax.lookup_const (syntax_of ctxt) c) then c
   else error ("Unknown syntax const: " ^ quote c ^ Position.here pos);
 
 fun syntax add mode args ctxt =
@@ -1441,7 +1437,7 @@ end;
 
 (* local syntax *)
 
-val print_syntax = Syntax.print_syntax o syn_of;
+val print_syntax = Syntax.print_syntax o syntax_of;
 
 
 (* abbreviations *)

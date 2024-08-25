@@ -10,6 +10,7 @@ package isabelle
 import java.nio.file.Files
 
 import scala.annotation.tailrec
+import scala.collection.mutable
 
 
 object Isabelle_Cronjob {
@@ -19,16 +20,22 @@ object Isabelle_Cronjob {
   val main_dir: Path = Path.explode("~/cronjob")
   val main_state_file: Path = main_dir + Path.explode("run/main.state")
   val build_release_log: Path = main_dir + Path.explode("run/build_release.log")
+  val build_log_database_log: Path = main_dir + Path.explode("run/build_log_database.log")
   val current_log: Path = main_dir + Path.explode("run/main.log")  // owned by log service
   val cumulative_log: Path = main_dir + Path.explode("log/main.log")  // owned by log service
-
   val isabelle_repos: Path = main_dir + Path.explode("isabelle")
   val afp_repos: Path = main_dir + Path.explode("AFP")
+
+  lazy val isabelle_hg: Mercurial.Repository = Mercurial.self_repository()
+  lazy val afp_hg: Mercurial.Repository = Mercurial.repository(afp_repos)
 
   val mailman_archives_dir = Path.explode("~/cronjob/Mailman")
 
   val build_log_dirs =
     List(Path.explode("~/log"), Path.explode("~/afp/log"), Path.explode("~/cronjob/log"))
+
+  val isabelle_devel: Path = Path.explode("/data/isatest/html-data/devel")
+  val public_log: Path = Path.explode("/data/isatest/cronjob/run/main.log")  // owned by log service
 
 
 
@@ -39,13 +46,19 @@ object Isabelle_Cronjob {
 
   /* init and exit */
 
-  def get_rev(): String = Mercurial.repository(isabelle_repos).id()
-  def get_afp_rev(): String = Mercurial.repository(afp_repos).id()
+  def get_rev(): String = isabelle_hg.id()
+  def get_afp_rev(): String = afp_hg.id()
 
   val init: Logger_Task =
     Logger_Task("init",
       { logger =>
-        Isabelle_Devel.make_index()
+        val redirect = "https://isabelle-dev.sketis.net/home/menu/view/20"
+
+        HTML.write_document(isabelle_devel, "index.html",
+          List(
+            XML.Elem(Markup("meta",
+              List("http-equiv" -> "Refresh", "content" -> ("0; url=" + redirect))), Nil)),
+          List(HTML.link(redirect, HTML.text("Isabelle Development Resources"))))
 
         Mercurial.setup_repository(Isabelle_System.afp_repository.root, afp_repos)
 
@@ -57,8 +70,9 @@ object Isabelle_Cronjob {
             """ -a --include="*/" --include="plain_identify*" --exclude="*" """ +
             Bash.string(backup + "/log/.") + " " + File.bash_path(main_dir) + "/log/.").check
 
-        if (!Isabelle_Devel.cronjob_log.is_file) {
-          Files.createSymbolicLink(Isabelle_Devel.cronjob_log.java_path, current_log.java_path)
+        val cronjob_log = isabelle_devel + Path.basic("cronjob-main.log")
+        if (!cronjob_log.is_file) {
+          Files.createSymbolicLink(cronjob_log.java_path, public_log.java_path)
         }
       })
 
@@ -87,64 +101,36 @@ object Isabelle_Cronjob {
   val build_release: Logger_Task =
     Logger_Task("build_release", { logger =>
       build_release_log.file.delete
-      Isabelle_Devel.release_snapshot(logger.options, get_rev(), get_afp_rev(),
-        progress = new File_Progress(build_release_log))
+      val rev = get_rev()
+      val afp_rev = get_afp_rev()
+      val progress = new File_Progress(build_release_log)
+
+      Isabelle_System.with_tmp_dir("isadist") { target_dir =>
+        Isabelle_System.update_directory(isabelle_devel + Path.explode("release_snapshot"),
+          { website_dir =>
+            val context = Build_Release.Release_Context(target_dir, progress = progress)
+            Build_Release.build_release_archive(context, rev)
+            Build_Release.build_release(logger.options, context, afp_rev = afp_rev,
+              build_sessions = List(Isabelle_System.getenv("ISABELLE_LOGIC")),
+              website = Some(website_dir))
+          }
+        )
+      }
     })
 
 
   /* remote build_history */
-
-  sealed case class Item(
-    known: Boolean,
-    isabelle_version: String,
-    afp_version: Option[String],
-    pull_date: Date
-  ) {
-    def unknown: Boolean = !known
-    def versions: (String, Option[String]) = (isabelle_version, afp_version)
-
-    def known_versions(rev: String, afp_rev: Option[String]): Boolean =
-      known && rev != "" && isabelle_version == rev &&
-      (afp_rev.isEmpty || afp_rev.get != "" && afp_version == afp_rev)
-  }
-
-  def recent_items(
-    db: SQL.Database,
-    days: Int,
-    rev: String,
-    afp_rev: Option[String],
-    sql: PostgreSQL.Source
-  ): List[Item] = {
-    val afp = afp_rev.isDefined
-
-    db.execute_query_statement(
-      Build_Log.Data.select_recent_versions(
-        days = days, rev = rev, afp_rev = afp_rev, sql = SQL.where(sql)),
-      List.from[Item],
-      { res =>
-        val known = res.bool(Build_Log.Data.known)
-        val isabelle_version = res.string(Build_Log.Prop.isabelle_version)
-        val afp_version = if (afp) proper_string(res.string(Build_Log.Prop.afp_version)) else None
-        val pull_date = res.date(Build_Log.Data.pull_date(afp))
-        Item(known, isabelle_version, afp_version, pull_date)
-      })
-  }
-
-  def unknown_runs(items: List[Item]): List[List[Item]] = {
-    val (run, rest) = Library.take_prefix[Item](_.unknown, items.dropWhile(_.known))
-    if (run.nonEmpty) run :: unknown_runs(rest) else Nil
-  }
 
   sealed case class Remote_Build(
     description: String,
     host: String,
     user: String = "",
     port: Int = 0,
-    historic: Boolean = false,
     history: Int = 0,
     history_base: String = "build_history_base",
     components_base: String = Components.dynamic_components_base,
     clean_components: Boolean = true,
+    shared_isabelle_self: Boolean = false,
     java_heap: String = "",
     options: String = "",
     args: String = "",
@@ -152,8 +138,10 @@ object Isabelle_Cronjob {
     bulky: Boolean = false,
     more_hosts: List[String] = Nil,
     detect: PostgreSQL.Source = "",
-    active: () => Boolean = () => true
+    count: () => Int = () => 1
   ) {
+    def active(): Boolean = count() > 0
+
     def open_session(options: Options): SSH.Session =
       SSH.open_session(options, host = host, user = user, port = port)
 
@@ -166,34 +154,26 @@ object Isabelle_Cronjob {
     def profile: Build_Status.Profile =
       Build_Status.Profile(description, history = history, afp = afp, bulky = bulky, sql = sql)
 
-    def pick(
-      options: Options,
-      rev: String = "",
-      filter: Item => Boolean = _ => true
-    ): Option[(String, Option[String])] = {
+    def history(db: SQL.Database, days: Int = 0): Build_Log.History = {
+      val rev = get_rev()
       val afp_rev = if (afp) Some(get_afp_rev()) else None
+      val base_rev = isabelle_hg.id(history_base)
+      val filter_nodes = isabelle_hg.graph().all_succs(List(base_rev)).toSet
+      Build_Log.History.retrieve(db, days, rev, afp_rev, sql,
+        entry => filter_nodes(entry.isabelle_version))
+    }
 
+    def pick(options: Options): Option[(String, Option[String])] = {
       val store = Build_Log.store(options)
       using(store.open_database()) { db =>
-        def pick_days(days: Int, gap: Int): Option[(String, Option[String])] = {
-          val items = recent_items(db, days, rev, afp_rev, sql).filter(filter)
-          def runs = unknown_runs(items).filter(run => run.length >= gap)
-
-          if (historic || items.exists(_.known_versions(rev, afp_rev))) {
-            val longest_run =
-              runs.foldLeft(List.empty[Item]) {
-                case (item1, item2) => if (item1.length >= item2.length) item1 else item2
-              }
-            if (longest_run.isEmpty) None
-            else Some(longest_run(longest_run.length / 2).versions)
-          }
-          else if (rev != "") Some((rev, afp_rev))
-          else runs.flatten.headOption.map(_.versions)
+        def get(days: Int, gap: Int): Option[(String, Option[String])] = {
+          val runs = history(db, days = days).unknown_runs(filter = run => run.length >= gap)
+          Build_Log.History.Run.longest(runs).median.map(_.versions)
         }
-
-        pick_days(options.int("build_log_history") max history, 2) orElse
-        pick_days(200, 5) orElse
-        pick_days(2000, 1)
+        get(options.int("build_log_history") max history, 2) orElse
+        get(300, 8) orElse
+        get(3000, 32) orElse
+        get(0, 1)
       }
     }
 
@@ -206,6 +186,14 @@ object Isabelle_Cronjob {
 
   val remote_builds_old: List[Remote_Build] =
     List(
+      Remote_Build("Linux A", "augsburg1",
+        options = "-m32 -B -M4" +
+          " -e ISABELLE_OCAML=ocaml -e ISABELLE_OCAMLC=ocamlc -e ISABELLE_OCAMLFIND=ocamlfind" +
+          " -e ISABELLE_GHC_SETUP=true" +
+          " -e ISABELLE_MLTON=mlton -e ISABELLE_MLTON_OPTIONS=" +
+          " -e ISABELLE_SMLNJ=sml" +
+          " -e ISABELLE_SWIPL=swipl",
+        args = "-a -d '~~/src/Benchmarks'"),
       Remote_Build("macOS 10.15 Catalina", "laramac01", user = "makarius",
         options = "-m32 -M4 -e ISABELLE_GHC_SETUP=true -p pide_session=false",
         args = "-a -d '~~/src/Benchmarks'"),
@@ -219,7 +207,7 @@ object Isabelle_Cronjob {
         args = "-a -d '~~/src/Benchmarks'"),
       Remote_Build("Linux A", "lxbroy9",
         java_heap = "2g", options = "-m32 -B -M1x2,2", args = "-N -g timing"),
-      Remote_Build("Linux Benchmarks", "lxbroy5", historic = true, history = 90,
+      Remote_Build("Linux Benchmarks", "lxbroy5", history = 90,
         java_heap = "2g",
         options = "-m32 -B -M1x2,2 -t Benchmarks" +
           " -e ISABELLE_GHC=ghc -e ISABELLE_MLTON=mlton -e ISABELLE_OCAML=ocaml" +
@@ -240,6 +228,25 @@ object Isabelle_Cronjob {
           args = "-N -X large -X slow",
           afp = true,
           detect = Build_Log.Prop.build_tags.toString + " = " + SQL.string("AFP")),
+      Remote_Build("AFP old2", "lrzcloud2", history = 120,
+        java_heap = "8g",
+        options = "-m32 -M1x5 -t AFP" +
+          " -e ISABELLE_GHC=ghc" +
+          " -e ISABELLE_MLTON=mlton -e ISABELLE_MLTON_OPTIONS=" +
+          " -e ISABELLE_OCAML=ocaml -e ISABELLE_OCAMLC=ocamlc -e ISABELLE_OCAMLFIND=ocamlfind" +
+          " -e ISABELLE_SMLNJ=sml",
+        args = "-a -X large -X slow",
+        afp = true,
+        detect = Build_Log.Prop.build_tags.toString + " = " + SQL.string("AFP"),
+        count = () => if (Date.now().unix_epoch_day % 2 == 0) 1 else 0),
+      Remote_Build("AFP old2", "lrzcloud2",
+        java_heap = "8g",
+        options = "-m64 -M8 -U30000 -s10 -t AFP",
+        args = "-g large -g slow",
+        afp = true,
+        bulky = true,
+        detect = Build_Log.Prop.build_tags.toString + " = " + SQL.string("AFP"),
+        count = () => if (Date.now().unix_epoch_day % 2 == 1) 1 else 0),
       Remote_Build("Poly/ML 5.7 Linux", "lxbroy8",
         history_base = "37074e22e8be",
         options = "-m32 -B -M1x2,2 -t polyml-5.7 -i 'init_component /home/isabelle/contrib/polyml-5.7'",
@@ -307,31 +314,19 @@ object Isabelle_Cronjob {
         }
       }
 
-  val remote_build_mini3 =
-    Remote_Build("macOS 13 Ventura (ARM64)", "mini3",
-      history_base = "8e590adaac5e",
-      options = "-a -m32 -B -M1x4,2x2,4 -p pide_session=false" +
-        " -e ISABELLE_MLTON=/opt/homebrew/bin/mlton -e ISABELLE_MLTON_OPTIONS=" +
-        " -e ISABELLE_SWIPL=/opt/homebrew/bin/swipl",
-      args = "-a -d '~~/src/Benchmarks'")
-
   val remote_builds1: List[List[Remote_Build]] = {
     List(
-      List(Remote_Build("Linux A", "augsburg1",
-          options = "-m32 -B -M4" +
-            " -e ISABELLE_OCAML=ocaml -e ISABELLE_OCAMLC=ocamlc -e ISABELLE_OCAMLFIND=ocamlfind" +
-            " -e ISABELLE_GHC_SETUP=true" +
-            " -e ISABELLE_MLTON=mlton -e ISABELLE_MLTON_OPTIONS=" +
-            " -e ISABELLE_SMLNJ=sml" +
-            " -e ISABELLE_SWIPL=swipl",
-          args = "-a -d '~~/src/Benchmarks'")),
-      List(Remote_Build("Linux B", "lxbroy10", historic = true, history = 90,
-        options = "-m32 -B -M1x4,2,4,6", args = "-N -g timing")),
-      List(Remote_Build("macOS 10.13 High Sierra", "lapbroy68",
-        options = "-m32 -B -M1,2,4 -e ISABELLE_GHC_SETUP=true -p pide_session=false",
+      List(Remote_Build("Linux (ARM)", "linux-arm",
+        history_base = "build_history_base_arm",
+        clean_components = false,
+        shared_isabelle_self = true,
+        options = "-m32 -B -M1x2 -U 4000 -p timeout_scale=2" +
+          " -e ISABELLE_SWIPL=swipl",
         args = "-a -d '~~/src/Benchmarks'")),
+      List(Remote_Build("Linux B", "lxbroy10", history = 90,
+        options = "-m32 -B -M1x4,2,4,6", args = "-N -g timing")),
       List(
-        Remote_Build("macOS 11 Big Sur", "mini1",
+        Remote_Build("macOS 11 Big Sur (Intel)", "mini1",
           options = "-m32 -B -M1x2,2,4 -p pide_session=false" +
             " -e ISABELLE_OCAML=ocaml -e ISABELLE_OCAMLC=ocamlc -e ISABELLE_OCAML_SETUP=true" +
             " -e ISABELLE_GHC_SETUP=true" +
@@ -340,28 +335,38 @@ object Isabelle_Cronjob {
             " -e ISABELLE_SWIPL=/usr/local/bin/swipl",
           args = "-a -d '~~/src/Benchmarks'")),
       List(
-        Remote_Build("macOS 10.14 Mojave", "mini2",
-          options = "-m32 -B -M1x2,2,4 -p pide_session=false" +
-            " -e ISABELLE_OCAML=ocaml -e ISABELLE_OCAMLC=ocamlc -e ISABELLE_OCAML_SETUP=true" +
+        Remote_Build("AFP (macOS 14 Sonoma, Apple Silicon)", "studio1-sonoma", history = 120,
+          history_base = "build_history_base_arm",
+          java_heap = "8g",
+          options = "-m32 -M1x5 -p pide_session=false -t AFP" +
             " -e ISABELLE_GHC_SETUP=true" +
-            " -e ISABELLE_MLTON=/usr/local/bin/mlton -e ISABELLE_MLTON_OPTIONS=" +
+            " -e ISABELLE_GO_SETUP=true" +
             " -e ISABELLE_SMLNJ=/usr/local/smlnj/bin/sml" +
-            " -e ISABELLE_SWIPL=/usr/local/bin/swipl",
-          args = "-a -d '~~/src/Benchmarks'"),
+            " -e ISABELLE_SWIPL=/opt/homebrew/bin/swipl",
+          args = "-a -d '~~/src/Benchmarks' -X large -X slow",
+          afp = true,
+          detect = Build_Log.Prop.build_tags.toString + " = " + SQL.string("AFP"))),
+      List(
         Remote_Build("macOS, quick_and_dirty", "mini2",
           options = "-m32 -M4 -t quick_and_dirty -p pide_session=false",
           args = "-a -o quick_and_dirty",
-          detect = Build_Log.Prop.build_tags.toString + " = " + SQL.string("quick_and_dirty")),
+          detect = Build_Log.Prop.build_tags.toString + " = " + SQL.string("quick_and_dirty"),
+          count = () => 0),
         Remote_Build("macOS, skip_proofs", "mini2",
           options = "-m32 -M4 -t skip_proofs -p pide_session=false", args = "-a -o skip_proofs",
-          detect = Build_Log.Prop.build_tags.toString + " = " + SQL.string("skip_proofs"))),
-      List(remote_build_mini3, remote_build_mini3, remote_build_mini3),
+          detect = Build_Log.Prop.build_tags.toString + " = " + SQL.string("skip_proofs"),
+          count = () => 0)),
       List(
-        Remote_Build("macOS 12 Monterey", "monterey", user = "makarius",
-          options = "-m32 -M4 -e ISABELLE_GHC_SETUP=true -p pide_session=false",
-          args = "-a -d '~~/src/Benchmarks'")),
+        Remote_Build("macOS 13 Ventura (ARM)", "mini3",
+          history_base = "build_history_base_arm",
+          options = "-a -m32 -B -M1x4,2x2,4 -p pide_session=false" +
+            " -e ISABELLE_GHC_SETUP=true" +
+            " -e ISABELLE_MLTON=/opt/homebrew/bin/mlton -e ISABELLE_MLTON_OPTIONS=" +
+            " -e ISABELLE_SWIPL=/opt/homebrew/bin/swipl",
+          args = "-a -d '~~/src/Benchmarks'",
+          count = () => 3)),
       List(
-        Remote_Build("Windows", "vmnipkow9", historic = true, history = 90,
+        Remote_Build("Windows", "vmnipkow9", history = 90,
           components_base = "/cygdrive/d/isatest/contrib",
           options = "-m32 -M4" +
             " -e ISABELLE_OCAML=ocaml -e ISABELLE_OCAMLC=ocamlc -e ISABELLE_OCAML_SETUP=true" +
@@ -370,46 +375,30 @@ object Isabelle_Cronjob {
           args = "-a",
           detect =
             Build_Log.Settings.ML_PLATFORM.toString + " = " + SQL.string("x86-windows") + " OR " +
-            Build_Log.Settings.ML_PLATFORM + " = " + SQL.string("x86_64_32-windows")),
-        Remote_Build("Windows", "vmnipkow9", historic = true, history = 90,
+            Build_Log.Settings.ML_PLATFORM + " = " + SQL.string("x86_64_32-windows"),
+          count = () => 2),
+        Remote_Build("Windows", "vmnipkow9", history = 90,
           components_base = "/cygdrive/d/isatest/contrib",
           options = "-m64 -M4" +
-            " -C /cygdrive/d/isatest/contrib" +
+            " -S /cygdrive/d/isatest/contrib" +
             " -e ISABELLE_OCAML=ocaml -e ISABELLE_OCAMLC=ocamlc -e ISABELLE_OCAML_SETUP=true" +
             " -e ISABELLE_GHC_SETUP=true" +
             " -e ISABELLE_SMLNJ=/usr/local/smlnj-110.81/bin/sml",
           args = "-a",
-          detect = Build_Log.Settings.ML_PLATFORM.toString + " = " + SQL.string("x86_64-windows"))))
+          detect = Build_Log.Settings.ML_PLATFORM.toString + " = " + SQL.string("x86_64-windows"),
+          count = () => 2))
+    )
   }
 
   val remote_builds2: List[List[Remote_Build]] =
-    List(
-      List(
-        Remote_Build("AFP", "lrzcloud2", history = 120,
-          java_heap = "8g",
-          options = "-m32 -M1x5 -t AFP" +
-            " -e ISABELLE_GHC=ghc" +
-            " -e ISABELLE_MLTON=mlton -e ISABELLE_MLTON_OPTIONS=" +
-            " -e ISABELLE_OCAML=ocaml -e ISABELLE_OCAMLC=ocamlc -e ISABELLE_OCAMLFIND=ocamlfind" +
-            " -e ISABELLE_SMLNJ=sml",
-          args = "-a -X large -X slow",
-          afp = true,
-          detect = Build_Log.Prop.build_tags.toString + " = " + SQL.string("AFP"),
-          active = () => Date.now().unix_epoch_day % 2 == 0),
-        Remote_Build("AFP", "lrzcloud2",
-          java_heap = "8g",
-          options = "-m64 -M8 -U30000 -s10 -t AFP",
-          args = "-g large -g slow",
-          afp = true,
-          bulky = true,
-          detect = Build_Log.Prop.build_tags.toString + " = " + SQL.string("AFP"),
-          active = () => Date.now().unix_epoch_day % 2 == 1)))
+    List()
 
   def remote_build_history(
     rev: String,
     afp_rev: Option[String],
     i: Int,
-    r: Remote_Build
+    r: Remote_Build,
+    progress: Progress = new Progress
   ) : Logger_Task = {
     val task_name = "build_history-" + r.host
     Logger_Task(task_name,
@@ -423,18 +412,26 @@ object Isabelle_Cronjob {
               components_base = r.components_base,
               clean_platform = r.clean_components,
               clean_archives = r.clean_components,
+              shared_isabelle_self = r.shared_isabelle_self,
               rev = rev,
               afp_repos = if (afp_rev.isDefined) Some(afp_repos) else None,
               afp_rev = afp_rev.getOrElse(""),
               options =
                 " -N " + Bash.string(task_name) + (if (i < 0) "" else "_" + (i + 1).toString) +
                 " -f " + r.build_history_options,
+
               args = "-o timeout=10800 " + r.args)
 
-          for ((log_name, bytes) <- results) {
-            logger.log(Date.now(), log_name)
-            Bytes.write(logger.log_dir + Path.explode(log_name), bytes)
-          }
+          val log_files =
+            for ((log_name, bytes) <- results) yield {
+              val log_file = logger.log_dir + Path.explode(log_name)
+              logger.log(Date.now(), log_name)
+              Bytes.write(log_file, bytes)
+              log_file
+            }
+
+          Build_Log.build_log_database(logger.options, log_files,
+            progress = progress, ml_statistics = true)
         }
       })
   }
@@ -470,7 +467,7 @@ object Isabelle_Cronjob {
     val hostname: String = Isabelle_System.hostname()
 
     def log(date: Date, task_name: String, msg: String): Unit =
-      if (task_name != "") {
+      if (task_name.nonEmpty) {
         thread.send(
           "[" + Build_Log.print_date(date) + ", " + hostname + ", " + task_name + "]: " + msg)
       }
@@ -480,14 +477,14 @@ object Isabelle_Cronjob {
 
     def run_task(start_date: Date, task: Logger_Task): Unit = {
       val logger = start_logger(start_date, task.name)
-      val res = Exn.capture { task.body(logger) }
+      val res = Exn.result { task.body(logger) }
       val end_date = Date.now()
       val err =
         res match {
           case Exn.Res(_) => None
           case Exn.Exn(exn) =>
-            Output.writeln("Exception trace for " + quote(task.name) + ":")
-            exn.printStackTrace()
+            Output.writeln("Exception trace for " + quote(task.name) + ":\n" +
+              Exn.message(exn) + "\n" + Exn.trace(exn))
             val first_line = split_lines(Exn.message(exn)).headOption getOrElse "exception"
             Some(first_line)
         }
@@ -508,14 +505,14 @@ object Isabelle_Cronjob {
     def log(date: Date, msg: String): Unit = log_service.log(date, task_name, msg)
 
     def log_end(end_date: Date, err: Option[String]): Unit = {
-      val elapsed_time = end_date.time - start_date.time
+      val elapsed_time = end_date - start_date
       val msg =
         (if (err.isEmpty) "finished" else "ERROR " + err.get) +
         (if (elapsed_time.seconds < 3.0) "" else " (" + elapsed_time.message_hms + " elapsed time)")
       log(end_date, msg)
     }
 
-    val log_dir = Isabelle_System.make_directory(main_dir + Build_Log.log_subdir(start_date))
+    val log_dir: Path = Isabelle_System.make_directory(main_dir + Build_Log.log_subdir(start_date))
 
     log(start_date, "started")
   }
@@ -554,8 +551,16 @@ object Isabelle_Cronjob {
 
     /* structured tasks */
 
-    def SEQ(tasks: List[Logger_Task]): Logger_Task = Logger_Task(body = _ =>
-      for (task <- tasks.iterator if !exclude_task(task.name) || task.name == "") run_now(task))
+    def SEQ(tasks: List[() => Option[Logger_Task]]): Logger_Task =
+      Logger_Task(body = _ =>
+        for {
+          t <- tasks.iterator
+          task <- t()
+          if !exclude_task(task.name) || task.name.isEmpty
+        } run_now(task))
+
+    def SEQUENTIAL(tasks: Logger_Task*): Logger_Task =
+      SEQ(List.from(for (task <- tasks.iterator) yield () => Some(task)))
 
     def PAR(tasks: List[Logger_Task]): Logger_Task =
       Logger_Task(body =
@@ -575,46 +580,52 @@ object Isabelle_Cronjob {
         })
 
 
-    /* repository structure */
-
-    val hg = Mercurial.repository(isabelle_repos)
-    val hg_graph = hg.graph()
-
-    def history_base_filter(r: Remote_Build): Item => Boolean = {
-      val base_rev = hg.id(r.history_base)
-      val nodes = hg_graph.all_succs(List(base_rev)).toSet
-      (item: Item) => nodes(item.isabelle_version)
-    }
-
-
     /* main */
 
     val main_start_date = Date.now()
     File.write(main_state_file, main_start_date.toString + " " + log_service.hostname)
 
+    val build_log_database_progress = new File_Progress(build_log_database_log, verbose = true)
+    build_log_database_progress.echo(
+      "Started at " + Build_Log.print_date(build_log_database_progress.start))
+
     run(main_start_date,
       Logger_Task("isabelle_cronjob", logger =>
         run_now(
-          SEQ(List(
+          SEQUENTIAL(
             init,
-            PAR(List(mailman_archives, build_release)),
             PAR(
-              List(remote_builds1, remote_builds2).map(remote_builds =>
-              SEQ(List(
-                PAR(remote_builds.map(_.filter(_.active())).map(seq =>
-                  SEQ(
-                    for {
-                      (r, i) <- (if (seq.length <= 1) seq.map((_, -1)) else seq.zipWithIndex)
-                      (rev, afp_rev) <- r.pick(logger.options, hg.id(), history_base_filter(r))
-                    } yield remote_build_history(rev, afp_rev, i, r)))),
+              List(
+                mailman_archives,
+                build_release,
                 Logger_Task("build_log_database",
                   logger =>
                     Build_Log.build_log_database(logger.options, build_log_dirs,
+                      progress = build_log_database_progress,
                       vacuum = true, ml_statistics = true,
-                      snapshot = Some(Isabelle_Devel.build_log_snapshot))),
-                Logger_Task("build_status",
-                  logger => Isabelle_Devel.build_status(logger.options)))))),
-            exit)))))
+                      snapshot = Some(isabelle_devel + Path.explode("build_log.db")))))),
+            PAR(
+              List(remote_builds1, remote_builds2).map(remote_builds =>
+                SEQUENTIAL(
+                  PAR(remote_builds.map(seq =>
+                    SEQ(
+                      for {
+                        (r, i) <- (if (seq.length <= 1) seq.map((_, -1)) else seq.zipWithIndex)
+                        _ <- List.from(1 to r.count())
+                      } yield () => {
+                        r.pick(logger.options)
+                          .map({ case (rev, afp_rev) =>
+                            remote_build_history(rev, afp_rev, i, r,
+                              progress = build_log_database_progress) })
+                      }
+                    ))),
+                  Logger_Task("build_status", logger =>
+                    Isabelle_System.update_directory(
+                      isabelle_devel + Path.explode("build_status"),
+                      dir =>
+                        Build_Status.build_status(logger.options,
+                          target_dir = dir, ml_statistics = true)))))),
+            exit))))
 
     log_service.shutdown()
 

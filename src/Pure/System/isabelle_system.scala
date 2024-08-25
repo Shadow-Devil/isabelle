@@ -28,6 +28,8 @@ object Isabelle_System {
     override def get(name: String): String = Option(env.get(name)).getOrElse("")
   }
 
+  object No_Env extends Env(JMap.of())
+
   def settings(putenv: List[(String, String)] = Nil): JMap[String, String] = {
     val env0 = isabelle.setup.Environment.settings()
     if (putenv.isEmpty) env0
@@ -74,6 +76,7 @@ object Isabelle_System {
     synchronized {
       if (_classpath.isEmpty) _classpath = Some(Classpath())
     }
+    Registry.global
   }
 
 
@@ -114,7 +117,8 @@ object Isabelle_System {
       else ""
     }
 
-  def export_isabelle_identifier(isabelle_identifier: String): String =
+  def export_env(user_home: String = "", isabelle_identifier: String = ""): String =
+    "export USER_HOME=" + Bash.string(user_home) + "\n" +
     "export ISABELLE_IDENTIFIER=" + Bash.string(isabelle_identifier) + "\n"
 
   def isabelle_identifier(): Option[String] = proper_string(getenv("ISABELLE_IDENTIFIER"))
@@ -481,7 +485,7 @@ object Isabelle_System {
             (entry, result)
           }
         for {
-          (entry, Some(res)) <- items
+          case (entry, Some(res)) <- items
           if !entry.isDirectory
           t <- Option(entry.getLastModifiedTime)
         } Files.setLastModifiedTime(res, t)

@@ -216,16 +216,16 @@ fun consolidate_theory (Exn.Exn exn) = [Exn.Exn exn]
   | consolidate_theory (Exn.Res (Result {theory, exec_id, ...})) =
       let
         val _ = Execution.join [exec_id];
-        val res = Exn.capture Thm.consolidate_theory theory;
+        val result = Exn.capture Thm.consolidate_theory theory;
         val exns = maps Task_Queue.group_status (Execution.peek exec_id);
-      in res :: map Exn.Exn exns end;
+      in result :: map Exn.Exn exns end;
 
 fun present_theory (Exn.Exn exn) = [Exn.Exn exn]
   | present_theory (Exn.Res (Result {theory, present, ...})) =
       (case present () of
         NONE => []
       | SOME (context as {segments, ...}) =>
-          [Exn.capture (fn () => (apply_presentation context theory; (theory, segments))) ()]);
+          [Exn.capture_body (fn () => (apply_presentation context theory; (theory, segments)))]);
 
 in
 
@@ -247,7 +247,7 @@ val schedule_theories = Thread_Attributes.uninterruptible (fn _ => fn tasks =>
                   deps = map (Future.task_of o #2) deps, pri = 0, interrupts = true}
                 (fn () => body (join_parents deps name parents))
             else
-              Future.value_result (Exn.capture (fn () => body (join_parents deps name parents)) ())
+              Future.value_result (Exn.capture_body (fn () => body (join_parents deps name parents)))
         | Finished theory => Future.value (theory_result theory)));
 
     val results1 = futures |> maps (consolidate_theory o Future.join_result);
@@ -256,7 +256,7 @@ val schedule_theories = Thread_Attributes.uninterruptible (fn _ => fn tasks =>
     val results2 = (map o Exn.map_res) (K ()) present_results;
 
     val results3 = futures
-      |> map (fn future => Exn.capture (fn () => result_commit (Future.join future) ()) ());
+      |> map (fn future => Exn.capture_body (fn () => result_commit (Future.join future) ()));
 
     val results4 = map Exn.Exn (maps Task_Queue.group_status (Execution.reset ()));
 

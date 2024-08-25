@@ -20,6 +20,9 @@ text \<open>These [simp] attributes are double-edged.
 lemma nlistsE_length [simp]: "xs \<in> nlists n A \<Longrightarrow> size xs = n"
   by (simp add: nlists_def)
 
+lemma in_nlists_UNIV: "xs \<in> nlists k UNIV \<longleftrightarrow> length xs = k"
+unfolding nlists_def by(auto)
+
 lemma less_lengthI: "\<lbrakk> xs \<in> nlists n A; p < n \<rbrakk> \<Longrightarrow> p < size xs"
 by (simp)
 
@@ -35,6 +38,9 @@ proof
   with size show "xs \<in> nlists n B" by(clarsimp intro!: nlistsI)
 qed
 
+lemma nlists_singleton: "nlists n {a} = {replicate n a}"
+unfolding nlists_def by(auto simp: replicate_length_same dest!: subset_singletonD)
+
 lemma nlists_n_0 [simp]: "nlists 0 A = {[]}"
 unfolding nlists_def by (auto)
 
@@ -44,9 +50,11 @@ unfolding nlists_def by (cases "xs") auto
 lemma Cons_in_nlists_Suc [iff]: "(x#xs \<in> nlists (Suc n) A) \<longleftrightarrow> (x\<in>A \<and> xs \<in> nlists n A)"
 unfolding nlists_def by (auto)
 
+lemma nlists_Suc: "nlists (Suc n) A = (\<Union>a\<in>A. (#) a ` nlists n A)"
+by(auto simp: set_eq_iff image_iff in_nlists_Suc_iff)
+
 lemma nlists_not_empty: "A\<noteq>{} \<Longrightarrow> \<exists>xs. xs \<in> nlists n A"
 by (induct "n") (auto simp: in_nlists_Suc_iff)
-
 
 lemma nlistsE_nth_in: "\<lbrakk> xs \<in> nlists n A; i < n \<rbrakk> \<Longrightarrow> xs!i \<in> A"
 unfolding nlists_def by (auto)
@@ -98,7 +106,8 @@ unfolding nlists_def by (auto)
 lemma nlists_replicateI [intro]: "x \<in> A \<Longrightarrow> replicate n x \<in> nlists n A"
  by (induct n) auto
 
-lemma nlists_set[code]: "nlists n (set xs) = set (List.n_lists n xs)"
-unfolding nlists_def by (rule sym, induct n) (auto simp: image_iff length_Suc_conv)
+text \<open>Link to an executable version on lists in List.\<close>
+lemma nlists_set[code]: "nlists n (set xs) = set(List.n_lists n xs)"
+by (metis nlists_def set_n_lists)
 
 end

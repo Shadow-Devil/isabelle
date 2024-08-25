@@ -106,22 +106,23 @@ fun ML {name_space, print_depth, here, print, error, ...} {line, file, verbose, 
       PolyML.Compiler.CPDebug debug] @
      (case print_depth of NONE => [] | SOME d => [PolyML.Compiler.CPPrintDepth (fn () => d)]);
     val _ =
-      (while not (List.null (! in_buffer)) do
-        PolyML.compiler (get, parameters) ())
-      handle exn =>
-        if Exn.is_interrupt exn then Exn.reraise exn
-        else
+      Isabelle_Thread.try_catch
+        (fn () =>
+          (while not (List.null (! in_buffer)) do
+            PolyML.compiler (get, parameters) ()))
+        (fn exn =>
          (put ("Exception- " ^ General.exnMessage exn ^ " raised");
-          error (output ()); Exn.reraise exn);
+          error (output ()); Exn.reraise exn));
   in if verbose then print (output ()) else () end;
 
 end;
 
-fun ML_file context {verbose, debug} file =
+fun ML_file context {verbose, debug} file = Thread_Attributes.uninterruptible_body (fn run =>
   let
     val instream = TextIO.openIn file;
-    val text = Exn.release (Exn.capture TextIO.inputAll instream before TextIO.closeIn instream);
-  in ML context {line = 1, file = file, verbose = verbose, debug = debug} text end;
+    val result = Exn.capture (run TextIO.inputAll) instream;
+    val _ = TextIO.closeIn instream;
+  in ML context {line = 1, file = file, verbose = verbose, debug = debug} (Exn.release result) end);
 
 fun ML_file_operations (f: bool option -> string -> unit) =
   {ML_file = f NONE, ML_file_debug = f (SOME true), ML_file_no_debug = f (SOME false)};

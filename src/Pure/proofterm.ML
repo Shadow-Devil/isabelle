@@ -28,10 +28,13 @@ sig
   and proof_body = PBody of
     {oracles: ((string * Position.T) * term option) Ord_List.T,
      thms: (serial * thm_node) Ord_List.T,
+     zboxes: ZTerm.zboxes,
+     zproof: zproof,
      proof: proof}
   type oracle = (string * Position.T) * term option
   type thm = serial * thm_node
   exception MIN_PROOF of unit
+  val zproof_of: proof_body -> zproof
   val proof_of: proof_body -> proof
   val join_proof: proof_body future -> proof
   val map_proof_of: (proof -> proof) -> proof_body -> proof_body
@@ -57,7 +60,7 @@ sig
   val unions_oracles: oracle Ord_List.T list -> oracle Ord_List.T
   val union_thms: thm Ord_List.T -> thm Ord_List.T -> thm Ord_List.T
   val unions_thms: thm Ord_List.T list -> thm Ord_List.T
-  val no_proof_body: proof -> proof_body
+  val no_proof_body: zproof -> proof -> proof_body
   val no_thm_names: proof -> proof
   val no_thm_proofs: proof -> proof
   val no_body_proofs: proof -> proof
@@ -72,15 +75,21 @@ sig
   val %> : proof * term -> proof
 
   (*primitive operations*)
+  val zproof_enabled: int -> bool
+  val proof_enabled: int -> bool
+  val oracle_enabled: int -> bool
+  val get_proofs_level: unit -> int
   val proofs: int Unsynchronized.ref
-  val proofs_enabled: unit -> bool
-  val atomic_proof: proof -> bool
-  val compact_proof: proof -> bool
+  val any_proofs_enabled: unit -> bool
   val proof_combt: proof * term list -> proof
   val proof_combt': proof * term option list -> proof
   val proof_combP: proof * proof list -> proof
   val strip_combt: proof -> proof * term option list
   val strip_combP: proof -> proof * proof list
+  val any_head_of: proof -> proof
+  val term_head_of: proof -> proof
+  val proof_head_of: proof -> proof
+  val compact_proof: proof -> bool
   val strip_thm_body: proof_body -> proof_body
   val map_proof_same: term Same.operation -> typ Same.operation
     -> (typ * class -> proof) -> proof Same.operation
@@ -93,16 +102,17 @@ sig
   val maxidx_proof: proof -> int -> int
   val size_of_proof: proof -> int
   val change_types: typ list option -> proof -> proof
-  val prf_abstract_over: term -> proof -> proof
-  val prf_incr_bv: int -> int -> int -> int -> proof -> proof
-  val incr_pboundvars: int -> int -> proof -> proof
+  val abstract_over: term -> proof -> proof
+  val incr_bv_same: int -> int -> int -> int -> proof Same.operation
+  val incr_bv: int -> int -> int -> int -> proof -> proof
+  val incr_boundvars: int -> int -> proof -> proof
   val prf_loose_bvar1: proof -> int -> bool
   val prf_loose_Pbvar1: proof -> int -> bool
   val prf_add_loose_bnos: int -> int -> proof -> int list * int list -> int list * int list
   val norm_proof: Envir.env -> proof -> proof
-  val norm_proof': Envir.env -> proof -> proof
-  val prf_subst_bounds: term list -> proof -> proof
-  val prf_subst_pbounds: proof list -> proof -> proof
+  val norm_proof_remove_types: Envir.env -> proof -> proof
+  val subst_bounds: term list -> proof -> proof
+  val subst_pbounds: proof list -> proof -> proof
   val freeze_thaw_prf: proof -> proof * (proof -> proof)
 
   (*proof terms for specific inference rules*)
@@ -111,18 +121,17 @@ sig
   val implies_intr_proof': term -> proof -> proof
   val forall_intr_proof: string * term -> typ option -> proof -> proof
   val forall_intr_proof': term -> proof -> proof
-  val varify_proof: term -> TFrees.set -> proof -> proof
+  val varifyT_proof: ((string * sort) * (indexname * sort)) list -> proof -> proof
   val legacy_freezeT: term -> proof -> proof
   val rotate_proof: term list -> term -> (string * typ) list -> term list -> int -> proof -> proof
   val permute_prems_proof: term list -> int -> int -> proof -> proof
   val generalize_proof: Names.set * Names.set -> int -> term -> proof -> proof
   val instantiate: typ TVars.table * term Vars.table -> proof -> proof
-  val lift_proof: term -> int -> term -> proof -> proof
+  val lift_proof: term -> int -> term list -> proof -> proof
   val incr_indexes: int -> proof -> proof
   val assumption_proof: term list -> term -> int -> proof -> proof
-  val bicompose_proof: bool -> term list -> term list -> term option -> term list ->
-    int -> int -> proof -> proof -> proof
-  val equality_axms: (string * term) list
+  val bicompose_proof: Envir.env -> int -> bool -> term list -> term list -> term option ->
+    term list -> int -> int -> proof -> proof -> proof
   val reflexive_axm: proof
   val symmetric_axm: proof
   val transitive_axm: proof
@@ -137,13 +146,10 @@ sig
   val equal_elim_proof: term -> term -> proof -> proof -> proof
   val abstract_rule_proof: string * term -> proof -> proof
   val combination_proof: term -> term -> term -> term -> proof -> proof -> proof
-  val strip_shyps_proof: Sorts.algebra -> (typ * sort) list -> (typ * sort) list ->
-    sort list -> proof -> proof
-  val of_sort_proof: Sorts.algebra ->
-    (class * class -> proof) ->
-    (string * class list list * class -> proof) ->
-    (typ * class -> proof) -> typ * sort -> proof list
-  val axm_proof: string -> term -> proof
+  val could_unify: proof * proof -> bool
+  type sorts_proof = (class * class -> proof) * (string * class list list * class -> proof)
+  val of_sort_proof: Sorts.algebra -> sorts_proof -> (typ * class -> proof) -> typ * sort -> proof list
+  val axiom_proof: string -> term -> proof
   val oracle_proof: string -> term -> proof
   val shrink_proof: proof -> proof
 
@@ -178,12 +184,10 @@ sig
   val export_proof_boxes_required: theory -> bool
   val export_proof_boxes: proof_body list -> unit
   val fulfill_norm_proof: theory -> (serial * proof_body) list -> proof_body -> proof_body
-  val thm_proof: theory -> (class * class -> proof) ->
-    (string * class list list * class -> proof) -> string * Position.T -> sort list ->
-    term list -> term -> (serial * proof_body future) list -> proof_body -> thm * proof
-  val unconstrain_thm_proof: theory -> (class * class -> proof) ->
-    (string * class list list * class -> proof) -> sort list -> term ->
-    (serial * proof_body future) list -> proof_body -> thm * proof
+  val thm_proof: theory -> sorts_proof -> string * Position.T -> sort list -> term list ->
+    term -> (serial * proof_body future) list -> proof_body -> proof_body
+  val unconstrain_thm_proof: theory -> sorts_proof -> sort list ->
+    term -> (serial * proof_body future) list -> proof_body -> term * proof_body
   val get_identity: sort list -> term list -> term -> proof ->
     {serial: serial, theory_name: string, name: string} option
   val get_approximative_name: sort list -> term list -> term -> proof -> string
@@ -221,6 +225,8 @@ datatype proof =
 and proof_body = PBody of
   {oracles: ((string * Position.T) * term option) Ord_List.T,
    thms: (serial * thm_node) Ord_List.T,
+   zboxes: ZTerm.zboxes,
+   zproof: zproof,
    proof: proof}
 and thm_body =
   Thm_Body of {open_proof: proof -> proof, body: proof_body future}
@@ -239,10 +245,14 @@ val thm_ord: thm ord = fn ((i, _), (j, _)) => int_ord (j, i);
 exception MIN_PROOF of unit;
 
 fun proof_of (PBody {proof, ...}) = proof;
+fun zproof_of (PBody {zproof, ...}) = zproof;
 val join_proof = Future.join #> proof_of;
 
-fun map_proof_of f (PBody {oracles, thms, proof}) =
-  PBody {oracles = oracles, thms = thms, proof = f proof};
+fun map_proof_of f (PBody {oracles, thms, zboxes, zproof, proof}) =
+  PBody {oracles = oracles, thms = thms, zboxes = zboxes, zproof = zproof, proof = f proof};
+
+fun no_proof (PBody {oracles, thms, zboxes, zproof, ...}) =
+  PBody {oracles = oracles, thms = thms, zboxes = zboxes, zproof = zproof, proof = MinProof};
 
 fun thm_header serial pos theory_name name prop types : thm_header =
   {serial = serial, pos = pos, theory_name = theory_name, name = name, prop = prop, types = types};
@@ -324,8 +334,9 @@ val unions_oracles = Ord_List.unions oracle_ord;
 val union_thms = Ord_List.union thm_ord;
 val unions_thms = Ord_List.unions thm_ord;
 
-fun no_proof_body proof = PBody {oracles = [], thms = [], proof = proof};
-val no_thm_body = thm_body (no_proof_body MinProof);
+fun no_proof_body zproof proof =
+  PBody {oracles = [], thms = [], zboxes = [], zproof = zproof, proof = proof};
+val no_thm_body = thm_body (no_proof_body ZDummy MinProof);
 
 fun no_thm_names (Abst (x, T, prf)) = Abst (x, T, no_thm_names prf)
   | no_thm_names (AbsP (x, t, prf)) = AbsP (x, t, no_thm_names prf)
@@ -348,7 +359,8 @@ fun no_body_proofs (Abst (x, T, prf)) = Abst (x, T, no_body_proofs prf)
   | no_body_proofs (prf1 %% prf2) = no_body_proofs prf1 %% no_body_proofs prf2
   | no_body_proofs (PThm (header, Thm_Body {open_proof, body})) =
       let
-        val body' = Future.value (no_proof_body (join_proof body));
+        val PBody {zproof, proof, ...} = Future.join body;
+        val body' = Future.value (no_proof_body zproof proof);
         val thm_body' = Thm_Body {open_proof = open_proof, body = body'};
       in PThm (header, thm_body') end
   | no_body_proofs a = a;
@@ -377,8 +389,9 @@ fun proof consts prf = prf |> variant
   fn PThm ({serial, pos, theory_name, name, prop, types}, Thm_Body {open_proof, body, ...}) =>
     ([int_atom serial, theory_name, name],
       pair (list properties) (pair (term consts) (pair (option (list typ)) (proof_body consts)))
-        (map Position.properties_of pos, (prop, (types, map_proof_of open_proof (Future.join body)))))]
-and proof_body consts (PBody {oracles, thms, proof = prf}) =
+        (map Position.properties_of pos,
+          (prop, (types, map_proof_of open_proof (Future.join body)))))]
+and proof_body consts (PBody {oracles, thms, zboxes = _, zproof = _, proof = prf}) =
   triple (list (pair (pair string (properties o Position.properties_of))
       (option (term consts)))) (list (thm consts)) (proof consts) (oracles, thms, prf)
 and thm consts (a, thm_node) =
@@ -446,7 +459,7 @@ and proof_body consts x =
     val (a, b, c) =
       triple (list (pair (pair string (Position.of_properties o properties))
         (option (term consts)))) (list (thm consts)) (proof consts) x;
-  in PBody {oracles = a, thms = b, proof = c} end
+  in PBody {oracles = a, thms = b, zboxes = [], zproof = ZDummy, proof = c} end
 and thm consts x =
   let
     val (a, (b, (c, (d, e)))) =
@@ -463,40 +476,62 @@ end;
 
 (** proof objects with different levels of detail **)
 
-val proofs = Unsynchronized.ref 2;
-fun proofs_enabled () = ! proofs >= 2;
+fun zproof_enabled proofs = proofs = 4 orelse proofs = 5 orelse proofs = 6;
+fun proof_enabled proofs = proofs = 2 orelse proofs = 6;
+fun oracle_enabled proofs = not (proofs = 0 orelse proofs = 4);
 
-fun atomic_proof prf =
-  (case prf of
-    Abst _ => false
-  | AbsP _ => false
-  | op % _ => false
-  | op %% _ => false
-  | MinProof => false
-  | _ => true);
+val proofs = Unsynchronized.ref 6;
 
-fun compact_proof (prf % _) = compact_proof prf
-  | compact_proof (prf1 %% prf2) = atomic_proof prf2 andalso compact_proof prf1
-  | compact_proof prf = atomic_proof prf;
+fun get_proofs_level () =
+  let val proofs = ! proofs in
+    if 0 <= proofs andalso proofs <= 6 andalso proofs <> 3 then proofs
+    else error ("Illegal level of detail for proof objects: " ^ string_of_int proofs)
+  end;
 
-fun (prf %> t) = prf % SOME t;
+fun any_proofs_enabled () =
+  let val proofs = get_proofs_level ()
+  in zproof_enabled proofs orelse proof_enabled proofs end;
+
+fun (p %> t) = p % SOME t;
 
 val proof_combt = Library.foldl (op %>);
 val proof_combt' = Library.foldl (op %);
 val proof_combP = Library.foldl (op %%);
 
 fun strip_combt prf =
-    let fun stripc (prf % t, ts) = stripc (prf, t::ts)
-          | stripc  x =  x
-    in  stripc (prf, [])  end;
+  let
+    fun strip (p % t, ts) = strip (p, t :: ts)
+      | strip res = res;
+  in strip (prf, []) end;
 
 fun strip_combP prf =
-    let fun stripc (prf %% prf', prfs) = stripc (prf, prf'::prfs)
-          | stripc  x =  x
-    in  stripc (prf, [])  end;
+  let
+    fun strip (p %% q, qs) = strip (p, q :: qs)
+      | strip res = res;
+  in strip (prf, []) end;
+
+fun any_head_of (p %% _) = any_head_of p
+  | any_head_of (p % _) = any_head_of p
+  | any_head_of p = p;
+
+fun term_head_of (p % _) = term_head_of p
+  | term_head_of p = p;
+
+fun proof_head_of (p %% _) = proof_head_of p
+  | proof_head_of p = p;
+
+val atomic_proof =
+  (fn Abst _ => false | AbsP _ => false
+    | op % _ => false | op %% _ => false
+    | MinProof => false
+    | _ => true);
+
+fun compact_proof (p % _) = compact_proof p
+  | compact_proof (p %% q) = atomic_proof q andalso compact_proof p
+  | compact_proof p = atomic_proof p;
 
 fun strip_thm_body (body as PBody {proof, ...}) =
-  (case fst (strip_combt (fst (strip_combP proof))) of
+  (case term_head_of (proof_head_of proof) of
     PThm (_, Thm_Body {body = body', ...}) => Future.join body'
   | _ => body);
 
@@ -520,7 +555,7 @@ fun map_proof_same term typ ofclass =
           (proof prf1 %% Same.commit proof prf2
             handle Same.SAME => prf1 %% proof prf2)
       | proof (PAxm (a, prop, SOME Ts)) = PAxm (a, prop, SOME (typs Ts))
-      | proof (PClass T_c) = ofclass T_c
+      | proof (PClass C) = ofclass C
       | proof (Oracle (a, prop, SOME Ts)) = Oracle (a, prop, SOME (typs Ts))
       | proof (PThm ({serial, pos, theory_name, name, prop, types = SOME Ts}, thm_body)) =
           PThm (thm_header serial pos theory_name name prop (SOME (typs Ts)), thm_body)
@@ -528,14 +563,13 @@ fun map_proof_same term typ ofclass =
   in proof end;
 
 fun map_proof_terms_same term typ = map_proof_same term typ (fn (T, c) => PClass (typ T, c));
-fun map_proof_types_same typ = map_proof_terms_same (Term_Subst.map_types_same typ) typ;
+fun map_proof_types_same typ = map_proof_terms_same (Term.map_types_same typ) typ;
 
-fun same eq f x =
-  let val x' = f x
-  in if eq (x, x') then raise Same.SAME else x' end;
+fun map_proof_terms f g =
+  Same.commit (map_proof_terms_same (Same.function_eq (op =) f) (Same.function_eq (op =) g));
 
-fun map_proof_terms f g = Same.commit (map_proof_terms_same (same (op =) f) (same (op =) g));
-fun map_proof_types f = Same.commit (map_proof_types_same (same (op =) f));
+fun map_proof_types f =
+  Same.commit (map_proof_types_same (Same.function_eq (op =) f));
 
 fun fold_proof_terms f (Abst (_, _, prf)) = fold_proof_terms f prf
   | fold_proof_terms f (AbsP (_, SOME t, prf)) = f t #> fold_proof_terms f prf
@@ -575,39 +609,34 @@ fun change_types types (PAxm (name, prop, _)) = PAxm (name, prop, types)
   | change_types _ prf = prf;
 
 
-(* utilities *)
-
-fun strip_abs (_::Ts) (Abs (_, _, t)) = strip_abs Ts t
-  | strip_abs _ t = t;
-
-fun mk_abs Ts t = Library.foldl (fn (t', T) => Abs ("", T, t')) (t, Ts);
-
-
 (*Abstraction of a proof term over its occurrences of v,
     which must contain no loose bound variables.
   The resulting proof term is ready to become the body of an Abst.*)
 
-fun prf_abstract_over v =
+fun abstract_over v =
   let
-    fun abst' lev u = if v aconv u then Bound lev else
-      (case u of
-         Abs (a, T, t) => Abs (a, T, abst' (lev + 1) t)
-       | f $ t => (abst' lev f $ absth' lev t handle Same.SAME => f $ abst' lev t)
-       | _ => raise Same.SAME)
-    and absth' lev t = (abst' lev t handle Same.SAME => t);
+    fun term lev u =
+      if v aconv u then Bound lev
+      else
+        (case u of
+           Abs (a, T, t) => Abs (a, T, term (lev + 1) t)
+         | t $ u =>
+            (term lev t $ Same.commit (term lev) u
+              handle Same.SAME => t $ term lev u)
+         | _ => raise Same.SAME);
 
-    fun abst lev (AbsP (a, t, prf)) =
-          (AbsP (a, Same.map_option (abst' lev) t, absth lev prf)
-           handle Same.SAME => AbsP (a, t, abst lev prf))
-      | abst lev (Abst (a, T, prf)) = Abst (a, T, abst (lev + 1) prf)
-      | abst lev (prf1 %% prf2) = (abst lev prf1 %% absth lev prf2
-          handle Same.SAME => prf1 %% abst lev prf2)
-      | abst lev (prf % t) = (abst lev prf % Option.map (absth' lev) t
-          handle Same.SAME => prf % Same.map_option (abst' lev) t)
-      | abst _ _ = raise Same.SAME
-    and absth lev prf = (abst lev prf handle Same.SAME => prf);
+    fun proof lev (AbsP (a, t, p)) =
+          (AbsP (a, Same.map_option (term lev) t, Same.commit (proof lev) p)
+           handle Same.SAME => AbsP (a, t, proof lev p))
+      | proof lev (Abst (a, T, p)) = Abst (a, T, proof (lev + 1) p)
+      | proof lev (p %% q) = (proof lev p %% Same.commit (proof lev) q
+          handle Same.SAME => p %% proof lev q)
+      | proof lev (p % t) =
+          (proof lev p % Option.map (Same.commit (term lev)) t
+            handle Same.SAME => p % Same.map_option (term lev) t)
+      | proof _ _ = raise Same.SAME;
 
-  in absth 0 end;
+  in Same.commit (proof 0) end;
 
 
 (*increments a proof term's non-local bound variables
@@ -615,28 +644,31 @@ fun prf_abstract_over v =
      inc is  increment for bound variables
      lev is  level at which a bound variable is considered 'loose'*)
 
-fun incr_bv' inct tlev t = incr_bv (inct, tlev, t);
+fun incr_bv_same incP inct =
+  if incP = 0 andalso inct = 0 then fn _ => fn _ => Same.same
+  else
+    let
+      val term = Term.incr_bv_same inct;
 
-fun prf_incr_bv' incP _ Plev _ (PBound i) =
-      if i >= Plev then PBound (i+incP) else raise Same.SAME
-  | prf_incr_bv' incP inct Plev tlev (AbsP (a, t, body)) =
-      (AbsP (a, Same.map_option (same (op =) (incr_bv' inct tlev)) t,
-         prf_incr_bv incP inct (Plev+1) tlev body) handle Same.SAME =>
-           AbsP (a, t, prf_incr_bv' incP inct (Plev+1) tlev body))
-  | prf_incr_bv' incP inct Plev tlev (Abst (a, T, body)) =
-      Abst (a, T, prf_incr_bv' incP inct Plev (tlev+1) body)
-  | prf_incr_bv' incP inct Plev tlev (prf %% prf') =
-      (prf_incr_bv' incP inct Plev tlev prf %% prf_incr_bv incP inct Plev tlev prf'
-       handle Same.SAME => prf %% prf_incr_bv' incP inct Plev tlev prf')
-  | prf_incr_bv' incP inct Plev tlev (prf % t) =
-      (prf_incr_bv' incP inct Plev tlev prf % Option.map (incr_bv' inct tlev) t
-       handle Same.SAME => prf % Same.map_option (same (op =) (incr_bv' inct tlev)) t)
-  | prf_incr_bv' _ _ _ _ _ = raise Same.SAME
-and prf_incr_bv incP inct Plev tlev prf =
-      (prf_incr_bv' incP inct Plev tlev prf handle Same.SAME => prf);
+      fun proof Plev _ (PBound i) =
+            if i >= Plev then PBound (i + incP) else raise Same.SAME
+        | proof Plev tlev (AbsP (a, t, p)) =
+            (AbsP (a, Same.map_option (term tlev) t, Same.commit (proof (Plev + 1) tlev) p)
+              handle Same.SAME => AbsP (a, t, proof (Plev + 1) tlev p))
+        | proof Plev tlev (Abst (a, T, body)) =
+            Abst (a, T, proof Plev (tlev + 1) body)
+        | proof Plev tlev (p %% q) =
+            (proof Plev tlev p %% Same.commit (proof Plev tlev) q
+              handle Same.SAME => p %% proof Plev tlev q)
+        | proof Plev tlev (p % t) =
+            (proof Plev tlev p % Option.map (Same.commit (term tlev)) t
+              handle Same.SAME => p % Same.map_option (term tlev) t)
+        | proof _ _ _ = raise Same.SAME;
+    in proof end;
 
-fun incr_pboundvars  0 0 prf = prf
-  | incr_pboundvars incP inct prf = prf_incr_bv incP inct 0 0 prf;
+fun incr_bv incP inct Plev tlev = Same.commit (incr_bv_same incP inct Plev tlev);
+
+fun incr_boundvars incP inct = incr_bv incP inct 0 0;
 
 
 fun prf_loose_bvar1 (prf1 %% prf2) k = prf_loose_bvar1 prf1 k orelse prf_loose_bvar1 prf2 k
@@ -708,38 +740,38 @@ fun del_conflicting_vars env tm =
 
 in
 
-fun norm_proof env =
+fun norm_proof envir =
   let
-    val envT = Envir.type_env env;
+    val tyenv = Envir.type_env envir;
     fun msg s = warning ("type conflict in norm_proof:\n" ^ s);
-    fun htype f t = f env t handle TYPE (s, _, _) =>
-      (msg s; f env (del_conflicting_vars env t));
-    fun htypeT f T = f envT T handle TYPE (s, _, _) =>
-      (msg s; f envT (del_conflicting_tvars envT T));
-    fun htypeTs f Ts = f envT Ts handle TYPE (s, _, _) =>
-      (msg s; f envT (map (del_conflicting_tvars envT) Ts));
+    fun norm_term_same t = Envir.norm_term_same envir t handle TYPE (s, _, _) =>
+      (msg s; Envir.norm_term_same envir (del_conflicting_vars envir t));
+    fun norm_type_same T = Envir.norm_type_same tyenv T handle TYPE (s, _, _) =>
+      (msg s; Envir.norm_type_same tyenv (del_conflicting_tvars tyenv T));
+    fun norm_types_same Ts = Envir.norm_types_same tyenv Ts handle TYPE (s, _, _) =>
+      (msg s;  Envir.norm_types_same tyenv (map (del_conflicting_tvars tyenv) Ts));
 
-    fun norm (Abst (s, T, prf)) =
-          (Abst (s, Same.map_option (htypeT Envir.norm_type_same) T, Same.commit norm prf)
-            handle Same.SAME => Abst (s, T, norm prf))
-      | norm (AbsP (s, t, prf)) =
-          (AbsP (s, Same.map_option (htype Envir.norm_term_same) t, Same.commit norm prf)
-            handle Same.SAME => AbsP (s, t, norm prf))
-      | norm (prf % t) =
-          (norm prf % Option.map (htype Envir.norm_term) t
-            handle Same.SAME => prf % Same.map_option (htype Envir.norm_term_same) t)
-      | norm (prf1 %% prf2) =
-          (norm prf1 %% Same.commit norm prf2
-            handle Same.SAME => prf1 %% norm prf2)
-      | norm (PAxm (s, prop, Ts)) =
-          PAxm (s, prop, Same.map_option (htypeTs Envir.norm_types_same) Ts)
+    fun norm (Abst (a, T, p)) =
+          (Abst (a, Same.map_option norm_type_same T, Same.commit norm p)
+            handle Same.SAME => Abst (a, T, norm p))
+      | norm (AbsP (a, t, p)) =
+          (AbsP (a, Same.map_option norm_term_same t, Same.commit norm p)
+            handle Same.SAME => AbsP (a, t, norm p))
+      | norm (p % t) =
+          (norm p % Option.map (Same.commit norm_term_same) t
+            handle Same.SAME => p % Same.map_option norm_term_same t)
+      | norm (p %% q) =
+          (norm p %% Same.commit norm q
+            handle Same.SAME => p %% norm q)
+      | norm (PAxm (a, prop, Ts)) =
+          PAxm (a, prop, Same.map_option norm_types_same Ts)
       | norm (PClass (T, c)) =
-          PClass (htypeT Envir.norm_type_same T, c)
-      | norm (Oracle (s, prop, Ts)) =
-          Oracle (s, prop, Same.map_option (htypeTs Envir.norm_types_same) Ts)
+          PClass (norm_type_same T, c)
+      | norm (Oracle (a, prop, Ts)) =
+          Oracle (a, prop, Same.map_option norm_types_same Ts)
       | norm (PThm ({serial = i, pos = p, theory_name, name = a, prop = t, types = Ts}, thm_body)) =
           PThm (thm_header i p theory_name a t
-            (Same.map_option (htypeTs Envir.norm_types_same) Ts), thm_body)
+            (Same.map_option norm_types_same Ts), thm_body)
       | norm _ = raise Same.SAME;
   in Same.commit norm end;
 
@@ -756,51 +788,45 @@ fun remove_types (Abs (s, _, t)) = Abs (s, dummyT, remove_types t)
 fun remove_types_env (Envir.Envir {maxidx, tenv, tyenv}) =
   Envir.Envir {maxidx = maxidx, tenv = Vartab.map (K (apsnd remove_types)) tenv, tyenv = tyenv};
 
-fun norm_proof' env prf = norm_proof (remove_types_env env) prf;
+fun norm_proof_remove_types env prf = norm_proof (remove_types_env env) prf;
 
 
 (* substitution of bound variables *)
 
-fun prf_subst_bounds args prf =
+fun subst_bounds args prf =
+  if null args then prf
+  else
+    let
+      val term = Term.subst_bounds_same args;
+
+      fun proof lev (AbsP (a, t, p)) =
+            (AbsP (a, Same.map_option (term lev) t, Same.commit (proof lev) p)
+              handle Same.SAME => AbsP (a, t, proof lev p))
+        | proof lev (Abst (a, T, p)) = Abst (a, T, proof (lev + 1) p)
+        | proof lev (p %% q) =
+            (proof lev p %% Same.commit (proof lev) q
+              handle Same.SAME => p %% proof lev q)
+        | proof lev (p % t) =
+            (proof lev p % Option.map (Same.commit (term lev)) t
+              handle Same.SAME => p % Same.map_option (term lev) t)
+        | proof _ _ = raise Same.SAME;
+    in Same.commit (proof 0) prf end;
+
+fun subst_pbounds args prf =
   let
     val n = length args;
-    fun subst' lev (Bound i) =
-         (if i<lev then raise Same.SAME    (*var is locally bound*)
-          else  incr_boundvars lev (nth args (i-lev))
-                  handle General.Subscript => Bound (i-n))  (*loose: change it*)
-      | subst' lev (Abs (a, T, body)) = Abs (a, T,  subst' (lev+1) body)
-      | subst' lev (f $ t) = (subst' lev f $ substh' lev t
-          handle Same.SAME => f $ subst' lev t)
-      | subst' _ _ = raise Same.SAME
-    and substh' lev t = (subst' lev t handle Same.SAME => t);
-
-    fun subst lev (AbsP (a, t, body)) =
-        (AbsP (a, Same.map_option (subst' lev) t, substh lev body)
-          handle Same.SAME => AbsP (a, t, subst lev body))
-      | subst lev (Abst (a, T, body)) = Abst (a, T, subst (lev+1) body)
-      | subst lev (prf %% prf') = (subst lev prf %% substh lev prf'
-          handle Same.SAME => prf %% subst lev prf')
-      | subst lev (prf % t) = (subst lev prf % Option.map (substh' lev) t
-          handle Same.SAME => prf % Same.map_option (subst' lev) t)
-      | subst _ _ = raise Same.SAME
-    and substh lev prf = (subst lev prf handle Same.SAME => prf);
-  in (case args of [] => prf | _ => substh 0 prf) end;
-
-fun prf_subst_pbounds args prf =
-  let
-    val n = length args;
-    fun subst (PBound i) Plev tlev =
-         (if i < Plev then raise Same.SAME    (*var is locally bound*)
-          else incr_pboundvars Plev tlev (nth args (i-Plev))
-                 handle General.Subscript => PBound (i-n)  (*loose: change it*))
-      | subst (AbsP (a, t, body)) Plev tlev = AbsP (a, t, subst body (Plev+1) tlev)
-      | subst (Abst (a, T, body)) Plev tlev = Abst (a, T, subst body Plev (tlev+1))
-      | subst (prf %% prf') Plev tlev = (subst prf Plev tlev %% substh prf' Plev tlev
-          handle Same.SAME => prf %% subst prf' Plev tlev)
-      | subst (prf % t) Plev tlev = subst prf Plev tlev % t
-      | subst  _ _ _ = raise Same.SAME
-    and substh prf Plev tlev = (subst prf Plev tlev handle Same.SAME => prf)
-  in (case args of [] => prf | _ => substh prf 0 0) end;
+    fun proof Plev tlev (PBound i) =
+          if i < Plev then raise Same.SAME    (*var is locally bound*)
+          else if i - Plev < n then incr_boundvars Plev tlev (nth args (i - Plev))
+          else PBound (i - n)  (*loose: change it*)
+      | proof Plev tlev (AbsP (a, t, p)) = AbsP (a, t, proof (Plev + 1) tlev p)
+      | proof Plev tlev (Abst (a, T, p)) = Abst (a, T, proof Plev (tlev + 1) p)
+      | proof Plev tlev (p %% q) =
+          (proof Plev tlev p %% Same.commit (proof Plev tlev) q
+            handle Same.SAME => p %% proof Plev tlev q)
+      | proof Plev tlev (p % t) = proof Plev tlev p % t
+      | proof _ _ _ = raise Same.SAME;
+  in if null args then prf else Same.commit (proof 0 0) prf end;
 
 
 (* freezing and thawing of variables in proof terms *)
@@ -813,7 +839,7 @@ fun frzT names =
 fun thawT names =
   map_type_tfree (fn (a, S) =>
     (case AList.lookup (op =) names a of
-      NONE => TFree (a, S)
+      NONE => raise Same.SAME
     | SOME ixn => TVar (ixn, S)));
 
 fun freeze names names' (t $ u) =
@@ -895,7 +921,7 @@ val implies_intr_proof' = gen_implies_intr_proof SOME;
 
 (* forall introduction *)
 
-fun forall_intr_proof (a, v) opt_T prf = Abst (a, opt_T, prf_abstract_over v prf);
+fun forall_intr_proof (a, v) opt_T prf = Abst (a, opt_T, abstract_over v prf);
 
 fun forall_intr_proof' v prf =
   let val (a, T) = (case v of Var ((a, _), T) => (a, T) | Free (a, T) => (a, T))
@@ -904,48 +930,29 @@ fun forall_intr_proof' v prf =
 
 (* varify *)
 
-fun varify_proof t fixed prf =
-  let
-    val fs =
-      build (t |> (Term.fold_types o Term.fold_atyps)
-        (fn TFree v => if TFrees.defined fixed v then I else insert (op =) v | _ => I));
-    val used =
-      Name.build_context (t |>
-        (fold_types o fold_atyps) (fn TVar ((a, _), _) => Name.declare a | _ => I));
-    val fmap = fs ~~ #1 (fold_map Name.variant (map fst fs) used);
-    fun thaw (a, S) =
-      (case AList.lookup (op =) fmap (a, S) of
-        NONE => TFree (a, S)
-      | SOME b => TVar ((b, 0), S));
-  in map_proof_terms (map_types (map_type_tfree thaw)) (map_type_tfree thaw) prf end;
+fun varifyT_proof names prf =
+  if null names then prf
+  else
+    let
+      val tab = TFrees.make names;
+      val typ =
+        Term.map_atyps_same
+          (fn TFree v =>
+              (case TFrees.lookup tab v of
+                NONE => raise Same.SAME
+              | SOME w => TVar w)
+            | _ => raise Same.SAME);
+    in Same.commit (map_proof_types_same typ) prf end;
 
 
-local
-
-fun new_name ix (pairs, used) =
-  let val v = singleton (Name.variant_list used) (string_of_indexname ix)
-  in ((ix, v) :: pairs, v :: used) end;
-
-fun freeze_one alist (ix, sort) =
-  (case AList.lookup (op =) alist ix of
-    NONE => TVar (ix, sort)
-  | SOME name => TFree (name, sort));
-
-in
+(* freeze *)
 
 fun legacy_freezeT t prf =
-  let
-    val used = Term.add_tfree_names t [];
-    val (alist, _) = fold_rev new_name (map #1 (Term.add_tvars t [])) ([], used);
-  in
-    (case alist of
-      [] => prf (*nothing to do!*)
-    | _ =>
-        let val frzT = map_type_tvar (freeze_one alist)
-        in map_proof_terms (map_types frzT) frzT prf end)
-  end;
-
-end;
+  (case Type.legacy_freezeT t of
+    NONE => prf
+  | SOME f =>
+      let val frzT = map_type_tvar (Same.function f)
+      in map_proof_terms (map_types frzT) frzT prf end);
 
 
 (* rotate assumptions *)
@@ -1000,65 +1007,64 @@ fun instantiate (instT, inst) =
 
 (* lifting *)
 
-fun lift_proof Bi inc prop prf =
+fun lift_proof gprop inc prems prf =
   let
-    fun lift'' Us Ts t =
-      strip_abs Ts (Logic.incr_indexes ([], Us, inc) (mk_abs Ts t));
+    val typ = Logic.incr_tvar_same inc;
+    val typs = Same.map_option (Same.map typ);
 
-    fun lift' Us Ts (Abst (s, T, prf)) =
-          (Abst (s, Same.map_option (Logic.incr_tvar_same inc) T, lifth' Us (dummyT::Ts) prf)
-           handle Same.SAME => Abst (s, T, lift' Us (dummyT::Ts) prf))
-      | lift' Us Ts (AbsP (s, t, prf)) =
-          (AbsP (s, Same.map_option (same (op =) (lift'' Us Ts)) t, lifth' Us Ts prf)
-           handle Same.SAME => AbsP (s, t, lift' Us Ts prf))
-      | lift' Us Ts (prf % t) = (lift' Us Ts prf % Option.map (lift'' Us Ts) t
-          handle Same.SAME => prf % Same.map_option (same (op =) (lift'' Us Ts)) t)
-      | lift' Us Ts (prf1 %% prf2) = (lift' Us Ts prf1 %% lifth' Us Ts prf2
-          handle Same.SAME => prf1 %% lift' Us Ts prf2)
-      | lift' _ _ (PAxm (s, prop, Ts)) =
-          PAxm (s, prop, (Same.map_option o Same.map) (Logic.incr_tvar_same inc) Ts)
-      | lift' _ _ (PClass (T, c)) =
-          PClass (Logic.incr_tvar_same inc T, c)
-      | lift' _ _ (Oracle (s, prop, Ts)) =
-          Oracle (s, prop, (Same.map_option o Same.map) (Logic.incr_tvar_same inc) Ts)
-      | lift' _ _ (PThm ({serial = i, pos = p, theory_name, name = s, prop, types = Ts}, thm_body)) =
-          PThm (thm_header i p theory_name s prop
-            ((Same.map_option o Same.map) (Logic.incr_tvar inc) Ts), thm_body)
-      | lift' _ _ _ = raise Same.SAME
-    and lifth' Us Ts prf = (lift' Us Ts prf handle Same.SAME => prf);
+    fun term Ts lev =
+      Logic.incr_indexes_operation {fixed = [], Ts = Ts, inc = inc, level = lev};
 
-    val ps = map (Logic.lift_all inc Bi) (Logic.strip_imp_prems prop);
-    val k = length ps;
+    fun proof Ts lev (Abst (a, T, p)) =
+          (Abst (a, Same.map_option typ T, Same.commit (proof Ts (lev + 1)) p)
+            handle Same.SAME => Abst (a, T, proof Ts (lev + 1) p))
+      | proof Ts lev (AbsP (a, t, p)) =
+          (AbsP (a, Same.map_option (term Ts lev) t, Same.commit (proof Ts lev) p)
+            handle Same.SAME => AbsP (a, t, proof Ts lev p))
+      | proof Ts lev (p % t) =
+          (proof Ts lev p % Option.map (Same.commit (term Ts lev)) t
+            handle Same.SAME => p % Same.map_option (term Ts lev) t)
+      | proof Ts lev (p %% q) =
+          (proof Ts lev p %% Same.commit (proof Ts lev) q
+            handle Same.SAME => p %% proof Ts lev q)
+      | proof _ _ (PAxm (a, prop, Ts)) = PAxm (a, prop, typs Ts)
+      | proof _ _ (PClass (T, c)) = PClass (typ T, c)
+      | proof _ _ (Oracle (a, prop, Ts)) = Oracle (a, prop, typs Ts)
+      | proof _ _ (PThm ({serial, pos, theory_name, name, prop, types}, thm_body)) =
+          PThm (thm_header serial pos theory_name name prop (typs types), thm_body)
+      | proof _ _ _ = raise Same.SAME;
 
-    fun mk_app b (i, j, prf) =
-          if b then (i-1, j, prf %% PBound i) else (i, j-1, prf %> Bound j);
+    val k = length prems;
 
-    fun lift Us bs i j (Const ("Pure.imp", _) $ A $ B) =
-            AbsP ("H", NONE (*A*), lift Us (true::bs) (i+1) j B)
-      | lift Us bs i j (Const ("Pure.all", _) $ Abs (a, T, t)) =
-            Abst (a, NONE (*T*), lift (T::Us) (false::bs) i (j+1) t)
-      | lift Us bs i j _ = proof_combP (lifth' (rev Us) [] prf,
-            map (fn k => (#3 (fold_rev mk_app bs (i-1, j-1, PBound k))))
-              (i + k - 1 downto i));
-  in
-    mk_AbsP ps (lift [] [] 0 0 Bi)
-  end;
+    fun mk_app b (i, j, p) =
+      if b then (i - 1, j, p %% PBound i) else (i, j - 1, p %> Bound j);
+
+    fun lift Ts bs i j (Const ("Pure.imp", _) $ A $ B) =
+          AbsP ("H", NONE (*A*), lift Ts (true::bs) (i + 1) j B)
+      | lift Ts bs i j (Const ("Pure.all", _) $ Abs (a, T, t)) =
+          Abst (a, NONE (*T*), lift (T::Ts) (false::bs) i (j + 1) t)
+      | lift Ts bs i j _ =
+          proof_combP (Same.commit (proof (rev Ts) 0) prf,
+            map (fn k => (#3 (fold_rev mk_app bs (i - 1, j - 1, PBound k)))) (i + k - 1 downto i));
+  in mk_AbsP prems (lift [] [] 0 0 gprop) end;
 
 fun incr_indexes i =
-  Same.commit (map_proof_terms_same
-    (Logic.incr_indexes_same ([], [], i)) (Logic.incr_tvar_same i));
+  Same.commit
+    (map_proof_terms_same
+      (Logic.incr_indexes_operation {fixed = [], Ts = [], inc = i, level = 0})
+      (Logic.incr_tvar_same i));
 
 
 (* proof by assumption *)
 
-fun mk_asm_prf t i m =
+fun mk_asm_prf C i m =
   let
     fun imp_prf _ i 0 = PBound i
       | imp_prf (Const ("Pure.imp", _) $ A $ B) i m = AbsP ("H", NONE (*A*), imp_prf B (i+1) (m-1))
       | imp_prf _ i _ = PBound i;
     fun all_prf (Const ("Pure.all", _) $ Abs (a, T, t)) = Abst (a, NONE (*T*), all_prf t)
       | all_prf t = imp_prf t (~i) m
-  in all_prf t end;
+  in all_prf C end;
 
 fun assumption_proof Bs Bi n prf =
   mk_AbsP Bs (proof_combP (prf, map PBound (length Bs - 1 downto 0) @ [mk_asm_prf Bi n ~1]));
@@ -1073,37 +1079,34 @@ fun flatten_params_proof i j n (Const ("Pure.imp", _) $ A $ B, k) =
   | flatten_params_proof i j n (_, k) = proof_combP (proof_combt (PBound (k+i),
       map Bound (j-1 downto 0)), map PBound (remove (op =) (i-n) (i-1 downto 0)));
 
-fun bicompose_proof flatten Bs As A oldAs n m rprf sprf =
+fun bicompose_proof env smax flatten Bs As A oldAs n m rprf sprf =
   let
+    val normt = Envir.norm_term env;
+    val normp = norm_proof_remove_types env;
+
     val lb = length Bs;
     val la = length As;
+
+    fun proof p =
+      mk_AbsP (map normt (Bs @ As)) (proof_combP (sprf,
+        map PBound (lb + la - 1 downto la)) %%
+          proof_combP (p, (if n>0 then [mk_asm_prf (the A) n m] else []) @
+            map (if flatten then flatten_params_proof 0 0 n else PBound o snd)
+              (oldAs ~~ (la - 1 downto 0))));
   in
-    mk_AbsP (Bs @ As) (proof_combP (sprf,
-      map PBound (lb + la - 1 downto la)) %%
-        proof_combP (rprf, (if n>0 then [mk_asm_prf (the A) n m] else []) @
-          map (if flatten then flatten_params_proof 0 0 n else PBound o snd)
-            (oldAs ~~ (la - 1 downto 0))))
+    if Envir.is_empty env then proof rprf
+    else if Envir.above env smax
+    then proof (normp rprf)
+    else normp (proof rprf)
   end;
 
 
 
-(** type classes **)
+(** sort constraints within the logic **)
 
-fun strip_shyps_proof algebra present witnessed extra prf =
-  let
-    val replacements = present @ witnessed @ map (`Logic.dummy_tfree) extra;
-    fun get_replacement S =
-      replacements |> get_first (fn (T', S') =>
-        if Sorts.sort_le algebra (S', S) then SOME T' else NONE);
-    fun replace T =
-      if exists (fn (T', _) => T' = T) present then raise Same.SAME
-      else
-        (case get_replacement (Type.sort_of_atyp T) of
-          SOME T' => T'
-        | NONE => raise Fail "strip_shyps_proof: bad type variable in proof term");
-  in Same.commit (map_proof_types_same (Term_Subst.map_atypsT_same replace)) prf end;
+type sorts_proof = (class * class -> proof) * (string * class list list * class -> proof);
 
-fun of_sort_proof algebra classrel_proof arity_proof hyps =
+fun of_sort_proof algebra (classrel_proof, arity_proof) hyps =
   Sorts.of_sort_derivation algebra
    {class_relation = fn _ => fn _ => fn (prf, c1) => fn c2 =>
       if c1 = c2 then prf else classrel_proof (c1, c2) %% prf,
@@ -1111,6 +1114,24 @@ fun of_sort_proof algebra classrel_proof arity_proof hyps =
       let val Ss = map (map snd) dom and prfs = maps (map fst) dom
       in proof_combP (arity_proof (a, Ss, c), prfs) end,
     type_variable = fn typ => map (fn c => (hyps (typ, c), c)) (Type.sort_of_atyp typ)};
+
+fun unconstrainT_proof algebra sorts_proof (ucontext: Logic.unconstrain_context) =
+  let
+    val typ = #typ_operation ucontext {strip_sorts = true};
+    val typ_sort = #typ_operation ucontext {strip_sorts = false};
+
+    fun hyps T =
+      (case AList.lookup (op =) (#constraints ucontext) T of
+        SOME t => Hyp t
+      | NONE => raise Fail "unconstrainT_proof: missing constraint");
+
+    fun class (T, c) =
+      let val T' = Same.commit typ_sort T
+      in the_single (of_sort_proof algebra sorts_proof hyps (T', [c])) end;
+  in
+    Same.commit (map_proof_same (Term.map_types_same typ) typ class)
+    #> fold_rev (implies_intr_proof o #2) (#constraints ucontext)
+  end;
 
 
 
@@ -1191,7 +1212,7 @@ fun const_proof mk name prop =
     val head = mk (name, prop1, NONE);
   in proof_combP (proof_combt' (head, args), map PClass outer_constraints) end;
 
-val axm_proof = const_proof PAxm;
+val axiom_proof = const_proof PAxm;
 val oracle_proof = const_proof Oracle;
 
 val shrink_proof =
@@ -1257,34 +1278,14 @@ val shrink_proof =
 
 (** axioms for equality **)
 
-val aT = TFree ("'a", []);
-val bT = TFree ("'b", []);
-val x = Free ("x", aT);
-val y = Free ("y", aT);
-val z = Free ("z", aT);
-val A = Free ("A", propT);
-val B = Free ("B", propT);
-val f = Free ("f", aT --> bT);
-val g = Free ("g", aT --> bT);
-
-val equality_axms =
- [("reflexive", Logic.mk_equals (x, x)),
-  ("symmetric", Logic.mk_implies (Logic.mk_equals (x, y), Logic.mk_equals (y, x))),
-  ("transitive",
-    Logic.list_implies ([Logic.mk_equals (x, y), Logic.mk_equals (y, z)], Logic.mk_equals (x, z))),
-  ("equal_intr",
-    Logic.list_implies ([Logic.mk_implies (A, B), Logic.mk_implies (B, A)], Logic.mk_equals (A, B))),
-  ("equal_elim", Logic.list_implies ([Logic.mk_equals (A, B), A], B)),
-  ("abstract_rule",
-    Logic.mk_implies
-      (Logic.all x (Logic.mk_equals (f $ x, g $ x)),
-        Logic.mk_equals (lambda x (f $ x), lambda x (g $ x)))),
-  ("combination", Logic.list_implies
-    ([Logic.mk_equals (f, g), Logic.mk_equals (x, y)], Logic.mk_equals (f $ x, g $ y)))];
+local val thy = Sign.local_path (Context.the_global_context ()) in
 
 val [reflexive_axm, symmetric_axm, transitive_axm, equal_intr_axm,
   equal_elim_axm, abstract_rule_axm, combination_axm] =
-    map (fn (s, t) => PAxm ("Pure." ^ s, Logic.varify_global t, NONE)) equality_axms;
+    map (fn (b, t) => PAxm (Sign.full_name thy b, Logic.varify_global t, NONE))
+      Theory.equality_axioms;
+
+end;
 
 val reflexive_proof = reflexive_axm % NONE;
 
@@ -1318,27 +1319,23 @@ fun check_comb (PAxm ("Pure.combination", _, _) % f % _ % _ % _ %% prf %% _) =
 
 fun combination_proof f g t u prf1 prf2 =
   let
-    val f = Envir.beta_norm f;
-    val g = Envir.beta_norm g;
-    val prf =
-      if check_comb prf1 then
-        combination_axm % NONE % NONE
-      else
-        (case prf1 of
-          PAxm ("Pure.reflexive", _, _) % _ =>
-            combination_axm %> remove_types f % NONE
-        | _ => combination_axm %> remove_types f %> remove_types g)
-  in
-    prf %
-      (case head_of f of
+    val f' = Envir.beta_norm f;
+    val g' = Envir.beta_norm g;
+    val ax =
+      if check_comb prf1 then combination_axm % NONE % NONE
+      else if is_reflexive_proof prf1 then combination_axm %> remove_types f' % NONE
+      else combination_axm %> remove_types f' %> remove_types g'
+    val t' =
+      (case Term.head_of f' of
         Abs _ => SOME (remove_types t)
       | Var _ => SOME (remove_types t)
-      | _ => NONE) %
-      (case head_of g of
+      | _ => NONE);
+    val u' =
+      (case Term.head_of g' of
         Abs _ => SOME (remove_types u)
       | Var _ => SOME (remove_types u)
-      | _ => NONE) %% prf1 %% prf2
-  end;
+      | _ => NONE);
+  in ax % t' % u' %% prf1 %% prf2 end;
 
 
 
@@ -1383,9 +1380,9 @@ fun match_proof Ts tymatch =
           if i = 0 andalso j = 0 then ((ixn, prf) :: pinst, tinst)
           else
             (case apfst (flt i) (apsnd (flt j) (prf_add_loose_bnos 0 0 prf ([], []))) of
-              ([], []) => ((ixn, incr_pboundvars (~i) (~j) prf) :: pinst, tinst)
+              ([], []) => ((ixn, incr_boundvars (~i) (~j) prf) :: pinst, tinst)
             | ([], _) =>
-                if j = 0 then ((ixn, incr_pboundvars (~i) (~j) prf) :: pinst, tinst)
+                if j = 0 then ((ixn, incr_boundvars (~i) (~j) prf) :: pinst, tinst)
                 else raise PMatch
             | _ => raise PMatch)
       | mtch Ts i j inst (prf1 % opt1, prf2 % opt2) =
@@ -1397,11 +1394,11 @@ fun match_proof Ts tymatch =
             (optmatch matchT inst (opT, opU)) (prf1, prf2)
       | mtch Ts i j inst (prf1, Abst (_, opU, prf2)) =
           mtch (the_default dummyT opU :: Ts) i (j+1) inst
-            (incr_pboundvars 0 1 prf1 %> Bound 0, prf2)
+            (incr_boundvars 0 1 prf1 %> Bound 0, prf2)
       | mtch Ts i j inst (AbsP (_, opt, prf1), AbsP (_, opu, prf2)) =
           mtch Ts (i+1) j (optmatch (matcht Ts j) inst (opt, opu)) (prf1, prf2)
       | mtch Ts i j inst (prf1, AbsP (_, _, prf2)) =
-          mtch Ts (i+1) j inst (incr_pboundvars 1 0 prf1 %% PBound 0, prf2)
+          mtch Ts (i+1) j inst (incr_boundvars 1 0 prf1 %% PBound 0, prf2)
       | mtch Ts i j inst (PAxm (s1, _, opTs), PAxm (s2, _, opUs)) =
           if s1 = s2 then optmatch matchTs inst (opTs, opUs)
           else raise PMatch
@@ -1426,7 +1423,7 @@ fun prf_subst (pinst, (tyinsts, insts)) =
     fun subst' lev (Var (xi, _)) =
         (case AList.lookup (op =) insts xi of
           NONE => raise Same.SAME
-        | SOME u => incr_boundvars lev u)
+        | SOME u => Term.incr_boundvars lev u)
       | subst' _ (Const (s, T)) = Const (s, substT T)
       | subst' _ (Free (s, T)) = Free (s, substT T)
       | subst' lev (Abs (a, T, body)) =
@@ -1452,7 +1449,7 @@ fun prf_subst (pinst, (tyinsts, insts)) =
       | subst plev tlev (Hyp (Var (xi, _))) =
           (case AList.lookup (op =) pinst xi of
             NONE => raise Same.SAME
-          | SOME prf' => incr_pboundvars plev tlev prf')
+          | SOME prf' => incr_boundvars plev tlev prf')
       | subst _ _ (PAxm (id, prop, Ts)) = PAxm (id, prop, Same.map_option substTs Ts)
       | subst _ _ (PClass (T, c)) = PClass (substT T, c)
       | subst _ _ (Oracle (id, prop, Ts)) = Oracle (id, prop, Same.map_option substTs Ts)
@@ -1463,20 +1460,15 @@ fun prf_subst (pinst, (tyinsts, insts)) =
 
 (*A fast unification filter: true unless the two terms cannot be unified.
   Terms must be NORMAL.  Treats all Vars as distinct. *)
-fun could_unify prf1 prf2 =
+fun could_unify (prf1, prf2) =
   let
     fun matchrands (prf1 %% prf2) (prf1' %% prf2') =
-          could_unify prf2 prf2' andalso matchrands prf1 prf1'
+          could_unify (prf2, prf2') andalso matchrands prf1 prf1'
       | matchrands (prf % SOME t) (prf' % SOME t') =
           Term.could_unify (t, t') andalso matchrands prf prf'
       | matchrands (prf % _) (prf' % _) = matchrands prf prf'
       | matchrands _ _ = true
-
-    fun head_of (prf %% _) = head_of prf
-      | head_of (prf % _) = head_of prf
-      | head_of prf = prf
-
-  in case (head_of prf1, head_of prf2) of
+  in case (any_head_of prf1, any_head_of prf2) of
         (_, Hyp (Var _)) => true
       | (Hyp (Var _), _) => true
       | (PAxm (a, _, _), PAxm (b, _, _)) => a = b andalso matchrands prf1 prf2
@@ -1499,24 +1491,24 @@ val normal_skel = Hyp (Var ((Name.uu, 0), propT));
 
 fun rewrite_prf tymatch (rules, procs) prf =
   let
-    fun rew _ _ (Abst (_, _, body) % SOME t) = SOME (prf_subst_bounds [t] body, no_skel)
-      | rew _ _ (AbsP (_, _, body) %% prf) = SOME (prf_subst_pbounds [prf] body, no_skel)
+    fun rew _ _ (Abst (_, _, body) % SOME t) = SOME (subst_bounds [t] body, no_skel)
+      | rew _ _ (AbsP (_, _, body) %% prf) = SOME (subst_pbounds [prf] body, no_skel)
       | rew Ts hs prf =
           (case get_first (fn r => r Ts hs prf) procs of
             NONE => get_first (fn (prf1, prf2) => SOME (prf_subst
               (match_proof Ts tymatch ([], (Vartab.empty, [])) (prf1, prf)) prf2, prf2)
-                 handle PMatch => NONE) (filter (could_unify prf o fst) rules)
+                 handle PMatch => NONE) (filter (fn (prf', _) => could_unify (prf, prf')) rules)
           | some => some);
 
     fun rew0 Ts hs (prf as AbsP (_, _, prf' %% PBound 0)) =
           if prf_loose_Pbvar1 prf' 0 then rew Ts hs prf
           else
-            let val prf'' = incr_pboundvars (~1) 0 prf'
+            let val prf'' = incr_boundvars (~1) 0 prf'
             in SOME (the_default (prf'', no_skel) (rew Ts hs prf'')) end
       | rew0 Ts hs (prf as Abst (_, _, prf' % SOME (Bound 0))) =
           if prf_loose_bvar1 prf' 0 then rew Ts hs prf
           else
-            let val prf'' = incr_pboundvars 0 (~1) prf'
+            let val prf'' = incr_boundvars 0 (~1) prf'
             in SOME (the_default (prf'', no_skel) (rew Ts hs prf'')) end
       | rew0 Ts hs prf = rew Ts hs prf;
 
@@ -1535,7 +1527,7 @@ fun rewrite_prf tymatch (rules, procs) prf =
     and rew2 Ts hs skel (prf % SOME t) =
           (case prf of
             Abst (_, _, body) =>
-              let val prf' = prf_subst_bounds [t] body
+              let val prf' = subst_bounds [t] body
               in SOME (the_default prf' (rew2 Ts hs no_skel prf')) end
           | _ =>
               (case rew1 Ts hs (case skel of skel' % _ => skel' | _ => no_skel) prf of
@@ -1546,7 +1538,7 @@ fun rewrite_prf tymatch (rules, procs) prf =
       | rew2 Ts hs skel (prf1 %% prf2) =
           (case prf1 of
             AbsP (_, _, body) =>
-              let val prf' = prf_subst_pbounds [prf2] body
+              let val prf' = subst_pbounds [prf2] body
               in SOME (the_default prf' (rew2 Ts hs no_skel prf')) end
           | _ =>
             let
@@ -1627,7 +1619,7 @@ fun app_types shift prop Ts prf =
     fun subst_same A =
       (case AList.lookup (op =) inst A of SOME T => T | NONE => raise Same.SAME);
     val subst_type_same =
-      Term_Subst.map_atypsT_same
+      Term.map_atyps_same
         (fn TVar ((a, i), S) => subst_same (TVar ((a, i - shift), S)) | A => subst_same A);
   in Same.commit (map_proof_types_same subst_type_same) prf end;
 
@@ -1668,7 +1660,7 @@ fun infer_type thy (env as Envir.Envir {maxidx, tenv, tyenv}) _ vTs (t as Const 
         (case Sign.const_type thy s of
           NONE => error ("reconstruct_proof: No such constant: " ^ quote s)
         | SOME T =>
-            let val T' = Type.strip_sorts (Logic.incr_tvar (maxidx + 1) T) in
+            let val T' = Term.strip_sortsT (Logic.incr_tvar (maxidx + 1) T) in
               (Const (s, T'), T', vTs,
                 Envir.Envir {maxidx = maxidx + 1, tenv = tenv, tyenv = tyenv})
             end)
@@ -1719,9 +1711,9 @@ fun decompose thy Ts (p as (t, u)) env =
     | ((Abs (_, T, t), []), (Abs (_, U, u), [])) =>
         decompose thy (T::Ts) (t, u) (unifyT thy env T U)
     | ((Abs (_, T, t), []), _) =>
-        decompose thy (T::Ts) (t, incr_boundvars 1 u $ Bound 0) env
+        decompose thy (T::Ts) (t, Term.incr_boundvars 1 u $ Bound 0) env
     | (_, (Abs (_, T, u), [])) =>
-        decompose thy (T::Ts) (incr_boundvars 1 t $ Bound 0, u) env
+        decompose thy (T::Ts) (Term.incr_boundvars 1 t $ Bound 0, u) env
     | _ => ([(mk_abs Ts t, mk_abs Ts u)], env)
   end;
 
@@ -1763,7 +1755,7 @@ fun make_constraints_cprf thy env cprf =
                 NONE => mk_tvar [] env
               | SOME T => (T, env));
             val (t, prf, cnstrts, env'', vTs') =
-              mk_cnstrts env' (T::Ts) (map (incr_boundvars 1) Hs) vTs cprf;
+              mk_cnstrts env' (T::Ts) (map (Term.incr_boundvars 1) Hs) vTs cprf;
           in
             (Const ("Pure.all", (T --> propT) --> propT) $ Abs (s, T, t), Abst (s, SOME T, prf),
               cnstrts, env'', vTs')
@@ -1827,8 +1819,8 @@ fun make_constraints_cprf thy env cprf =
           mk_cnstrts_atom env vTs prop opTs prf
       | mk_cnstrts env _ _ vTs (prf as PAxm (_, prop, opTs)) =
           mk_cnstrts_atom env vTs prop opTs prf
-      | mk_cnstrts env _ _ vTs (prf as PClass (T, c)) =
-          mk_cnstrts_atom env vTs (Logic.mk_of_class (T, c)) NONE prf
+      | mk_cnstrts env _ _ vTs (prf as PClass C) =
+          mk_cnstrts_atom env vTs (Logic.mk_of_class C) NONE prf
       | mk_cnstrts env _ _ vTs (prf as Oracle (_, prop, opTs)) =
           mk_cnstrts_atom env vTs prop opTs prf
       | mk_cnstrts env _ _ vTs (Hyp t) = (t, Hyp t, [], env, vTs)
@@ -1925,7 +1917,7 @@ fun prop_of0 Hs (PBound i) = nth Hs i
   | prop_of0 _ (Hyp t) = t
   | prop_of0 _ (PThm ({prop, types = SOME Ts, ...}, _)) = prop_of_atom prop Ts
   | prop_of0 _ (PAxm (_, prop, SOME Ts)) = prop_of_atom prop Ts
-  | prop_of0 _ (PClass (T, c)) = Logic.mk_of_class (T, c)
+  | prop_of0 _ (PClass C) = Logic.mk_of_class C
   | prop_of0 _ (Oracle (_, prop, SOME Ts)) = prop_of_atom prop Ts
   | prop_of0 _ _ = error "prop_of: partial proof object";
 
@@ -1993,14 +1985,19 @@ end;
 fun fulfill_norm_proof thy ps body0 =
   let
     val _ = consolidate_bodies (map #2 ps @ [body0]);
-    val PBody {oracles = oracles0, thms = thms0, proof = proof0} = body0;
+    val PBody {oracles = oracles0, thms = thms0, zboxes = zboxes0, zproof, proof = proof0} = body0;
     val oracles =
       unions_oracles
         (fold (fn (_, PBody {oracles, ...}) => not (null oracles) ? cons oracles) ps [oracles0]);
     val thms =
       unions_thms (fold (fn (_, PBody {thms, ...}) => not (null thms) ? cons thms) ps [thms0]);
+    val zboxes =
+      ZTerm.unions_zboxes
+        (fold (fn (_, PBody {zboxes, ...}) => not (null zboxes) ? cons zboxes) ps [zboxes0]);
     val proof = rew_proof thy proof0;
-  in PBody {oracles = oracles, thms = thms, proof = proof} end;
+  in
+    PBody {oracles = oracles, thms = thms, zboxes = zboxes, zproof = zproof, proof = proof}
+  end;
 
 fun fulfill_proof_future thy promises (postproc: proof_body -> proof_body) body =
   let
@@ -2130,7 +2127,7 @@ end;
 
 fun prune_body body =
   if Options.default_bool "prune_proofs"
-  then (Future.map o map_proof_of) (K MinProof) body
+  then Future.map no_proof body
   else body;
 
 fun export_enabled () = Options.default_bool "export_proofs";
@@ -2155,22 +2152,6 @@ fun export_proof_boxes bodies =
   in List.app (Lazy.force o #2) exports end;
 
 local
-
-fun unconstrainT_proof algebra classrel_proof arity_proof (ucontext: Logic.unconstrain_context) =
-  let
-    fun hyp_map hyp =
-      (case AList.lookup (op =) (#constraints ucontext) hyp of
-        SOME t => Hyp t
-      | NONE => raise Fail "unconstrainT_proof: missing constraint");
-
-    val typ = Term_Subst.map_atypsT_same (Type.strip_sorts o #atyp_map ucontext);
-    fun ofclass (ty, c) =
-      let val ty' = Term.map_atyps (#atyp_map ucontext) ty;
-      in the_single (of_sort_proof algebra classrel_proof arity_proof hyp_map (ty', [c])) end;
-  in
-    Same.commit (map_proof_same (Term_Subst.map_types_same typ) typ ofclass)
-    #> fold_rev (implies_intr_proof o snd) (#constraints ucontext)
-  end;
 
 fun export_proof thy i prop prf0 =
   let
@@ -2198,35 +2179,40 @@ fun export_proof thy i prop prf0 =
       strict = false} xml
   end;
 
-fun prepare_thm_proof unconstrain thy classrel_proof arity_proof
-    (name, pos) shyps hyps concl promises body =
+fun prepare_thm_proof unconstrain thy sorts_proof
+    (name, pos) shyps hyps concl promises
+    (PBody {oracles = oracles0, thms = thms0, zboxes = zboxes0, zproof = zproof0, proof = proof0}) =
   let
     val named = name <> "";
 
     val prop = Logic.list_implies (hyps, concl);
     val args = prop_args prop;
 
-    val (ucontext, prop1) = Logic.unconstrainT shyps prop;
+    val (ucontext as {typ_operation, ...}, prop1) = Logic.unconstrainT shyps prop;
 
-    val PBody {oracles = oracles0, thms = thms0, proof = prf} = body;
-    val body0 =
-      Future.value
-        (PBody {oracles = oracles0, thms = thms0,
-          proof = if proofs_enabled () then fold_rev implies_intr_proof hyps prf else MinProof});
+    val proofs = get_proofs_level ();
+    val (zproof1, zboxes1) =
+      if zproof_enabled proofs then
+        ZTerm.add_box_proof {unconstrain = unconstrain} thy hyps concl zproof0 zboxes0
+      else (ZDummy, []);
+    val proof1 =
+      if proof_enabled proofs then fold_rev implies_intr_proof hyps proof0
+      else MinProof;
 
     fun new_prf () =
       let
         val i = serial ();
-        val unconstrainT =
-          unconstrainT_proof (Sign.classes_of thy) classrel_proof arity_proof ucontext;
+        val unconstrainT = unconstrainT_proof (Sign.classes_of thy) sorts_proof ucontext;
         val postproc = map_proof_of (unconstrainT #> named ? rew_proof thy);
-      in (i, fulfill_proof_future thy promises postproc body0) end;
+        val body1 =
+          {oracles = oracles0, thms = thms0, zboxes = [], zproof = ZDummy, proof = proof1};
+      in (i, fulfill_proof_future thy promises postproc (Future.value (PBody body1))) end;
 
     val (i, body') =
       (*somewhat non-deterministic proof boxes!*)
       if export_enabled () then new_prf ()
       else
-        (case strip_combt (fst (strip_combP prf)) of
+        (case strip_combt (proof_head_of proof0) of
           (PThm ({serial = ser, name = a, prop = prop', types = NONE, ...}, thm_body'), args') =>
             if (a = "" orelse a = name) andalso prop' = prop1 andalso args' = args then
               let
@@ -2236,16 +2222,19 @@ fun prepare_thm_proof unconstrain thy classrel_proof arity_proof
             else new_prf ()
         | _ => new_prf ());
 
+    val exp_proof = Future.map proof_of body';
     val open_proof = not named ? rew_proof thy;
+    fun export_body () = Future.join exp_proof |> open_proof |> export_proof thy i prop1;
 
     val export =
       if export_enabled () then
         Lazy.lazy (fn () =>
-          join_proof body' |> open_proof |> export_proof thy i prop1 handle exn =>
-            if Exn.is_interrupt exn then
-              raise Fail ("Interrupt: potential resource problems while exporting proof " ^
-                string_of_int i)
-            else Exn.reraise exn)
+          (case Exn.capture_body export_body of
+            Exn.Res res => res
+          | Exn.Exn exn =>
+              if Exn.is_interrupt_breakdown exn then
+                raise Fail ("Resource problems while exporting proof " ^ string_of_int i)
+              else Exn.reraise exn))
       else no_export;
 
     val thm_body = prune_body body';
@@ -2254,20 +2243,26 @@ fun prepare_thm_proof unconstrain thy classrel_proof arity_proof
 
     val header = thm_header i ([pos, Position.thread_data ()]) theory_name name prop1 NONE;
     val head = PThm (header, Thm_Body {open_proof = open_proof, body = thm_body});
-    val proof =
+    val argst =
       if unconstrain then
-        proof_combt' (head, (map o Option.map o Term.map_types) (#map_atyps ucontext) args)
-      else
-        proof_combP (proof_combt' (head, args),
-          map PClass (#outer_constraints ucontext) @ map Hyp hyps);
-  in (thm, proof) end;
+        (Same.commit o Same.map o Same.map_option o Term.map_types_same)
+          (typ_operation {strip_sorts = true}) args
+      else args;
+    val argsP =
+      if unconstrain then []
+      else map PClass (#outer_constraints ucontext) @ map Hyp hyps;
+    val proof2 = proof_combP (proof_combt' (head, argst), argsP);
+
+    val body2 = {oracles = [], thms = [thm], zboxes = zboxes1, zproof = zproof1, proof = proof2};
+  in (prop1, PBody body2) end;
 
 in
 
-fun thm_proof thy = prepare_thm_proof false thy;
+fun thm_proof thy sorts_proof name shyps hyps concl promises =
+  prepare_thm_proof false thy sorts_proof name shyps hyps concl promises #> #2;
 
-fun unconstrain_thm_proof thy classrel_proof arity_proof shyps concl promises body =
-  prepare_thm_proof true thy classrel_proof arity_proof ("", Position.none)
+fun unconstrain_thm_proof thy sorts_proof shyps concl promises body =
+  prepare_thm_proof true thy sorts_proof ("", Position.none)
     shyps [] concl promises body;
 
 end;
@@ -2277,7 +2272,7 @@ end;
 
 fun get_identity shyps hyps prop prf =
   let val (_, prop) = Logic.unconstrainT shyps (Logic.list_implies (hyps, prop)) in
-    (case fst (strip_combt (fst (strip_combP prf))) of
+    (case term_head_of (proof_head_of prf) of
       PThm ({serial, theory_name, name, prop = prop', ...}, _) =>
         if prop = prop'
         then SOME {serial = serial, theory_name = theory_name, name = name} else NONE

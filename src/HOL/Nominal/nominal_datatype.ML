@@ -93,7 +93,7 @@ fun dest_permT (Type (\<^type_name>\<open>fun\<close>,
 fun permTs_of (Const (\<^const_name>\<open>Nominal.perm\<close>, T) $ t $ u) = fst (dest_permT T) :: permTs_of u
   | permTs_of _ = [];
 
-fun perm_simproc' ctxt ct =
+fun perm_proc ctxt ct =
   (case Thm.term_of ct of
     Const (\<^const_name>\<open>Nominal.perm\<close>, T) $ t $ (u as Const (\<^const_name>\<open>Nominal.perm\<close>, U) $ r $ s) =>
       let
@@ -115,9 +115,7 @@ fun perm_simproc' ctxt ct =
       end
   | _ => NONE);
 
-val perm_simproc =
-  Simplifier.make_simproc \<^context> "perm_simp"
-   {lhss = [\<^term>\<open>pi1 \<bullet> (pi2 \<bullet> x)\<close>], proc = K perm_simproc'};
+val perm_simproc = \<^simproc_setup>\<open>passive perm_simp ("pi1 \<bullet> (pi2 \<bullet> x)") = \<open>K perm_proc\<close>\<close>;
 
 fun projections ctxt rule =
   Project_Rule.projections ctxt rule
@@ -597,14 +595,14 @@ fun gen_nominal_datatype prep_specs (config: Old_Datatype_Aux.config) dts thy =
             (TFree (singleton (Name.variant_list (map fst tvs)) "'a", \<^sort>\<open>type\<close>));
           val pi = Free ("pi", permT);
           val T = Type (Sign.full_name thy name, map TFree tvs);
-        in apfst (pair r o hd)
-          (Global_Theory.add_defs_unchecked true
-            [((Binding.map_name (fn n => "prm_" ^ n ^ "_def") name, Logic.mk_equals
+        in apfst (pair r)
+          (Global_Theory.add_def_unchecked_overloaded
+            (Binding.map_name (fn n => "prm_" ^ n ^ "_def") name, Logic.mk_equals
               (Const (\<^const_name>\<open>Nominal.perm\<close>, permT --> T --> T) $ pi $ Free ("x", T),
                Const (Sign.intern_const thy ("Abs_" ^ Binding.name_of name), U --> T) $
                  (Const (\<^const_name>\<open>Nominal.perm\<close>, permT --> U --> U) $ pi $
                    (Const (Sign.intern_const thy ("Rep_" ^ Binding.name_of name), T --> U) $
-                     Free ("x", T))))), [])] thy)
+                     Free ("x", T))))) thy)
         end))
         (types_syntax ~~ tyvars ~~ List.take (rep_set_names'' ~~ recTs', length new_type_names));
 
@@ -777,9 +775,9 @@ fun gen_nominal_datatype prep_specs (config: Old_Datatype_Aux.config) dts thy =
         val eqn = HOLogic.mk_Trueprop (HOLogic.mk_eq
           (Const (rep_name, T --> T') $ lhs, rhs));
         val def_name = (Long_Name.base_name cname) ^ "_def";
-        val ([def_thm], thy') = thy |>
+        val (def_thm, thy') = thy |>
           Sign.add_consts [(cname', constrT, mx)] |>
-          (Global_Theory.add_defs false o map Thm.no_attributes) [(Binding.name def_name, def)];
+          Global_Theory.add_def (Binding.name def_name, def);
       in (thy', defs @ [def_thm], eqns @ [eqn]) end;
 
     fun dt_constr_defs ((((((_, (_, _, constrs)),
@@ -1562,7 +1560,7 @@ fun gen_nominal_datatype prep_specs (config: Old_Datatype_Aux.config) dts thy =
                  resolve_tac ctxt [rec_induct] 1 THEN REPEAT
                  (simp_tac (put_simpset HOL_basic_ss ctxt
                     addsimps flat perm_simps'
-                    addsimprocs [NominalPermeq.perm_simproc_app]) 1 THEN
+                    addsimprocs [NominalPermeq.perm_app_simproc]) 1 THEN
                   (resolve_tac ctxt rec_intrs THEN_ALL_NEW
                    asm_simp_tac (put_simpset HOL_ss ctxt addsimps (fresh_bij @ perm_bij))) 1))))
         val ths' = map (fn ((P, Q), th) =>
@@ -1975,7 +1973,7 @@ fun gen_nominal_datatype prep_specs (config: Old_Datatype_Aux.config) dts thy =
                              [cut_facts_tac [th'] 1,
                               full_simp_tac (put_simpset HOL_ss ctxt
                                 addsimps rec_eqns @ pi1_pi2_eqs @ perm_swap
-                                addsimprocs [NominalPermeq.perm_simproc_app]) 1,
+                                addsimprocs [NominalPermeq.perm_app_simproc]) 1,
                               full_simp_tac (put_simpset HOL_ss context'' addsimps (calc_atm @
                                 fresh_prems' @ freshs2' @ perm_fresh_fresh)) 1])
                       end;
@@ -2008,7 +2006,7 @@ fun gen_nominal_datatype prep_specs (config: Old_Datatype_Aux.config) dts thy =
                         (fold_rev (mk_perm []) pi1 rhs', fold_rev (mk_perm []) pi2 lhs')))
                       (fn _ => simp_tac (put_simpset HOL_ss context''
                            addsimps pi1_pi2_eqs @ rec_eqns
-                           addsimprocs [NominalPermeq.perm_simproc_app]) 1 THEN
+                           addsimprocs [NominalPermeq.perm_app_simproc]) 1 THEN
                          TRY (simp_tac (put_simpset HOL_ss context'' addsimps
                            (fresh_prems' @ freshs2' @ calc_atm @ perm_fresh_fresh)) 1));
 
@@ -2042,7 +2040,7 @@ fun gen_nominal_datatype prep_specs (config: Old_Datatype_Aux.config) dts thy =
       |> Sign.add_consts (map (fn ((name, T), T') =>
           (Binding.name (Long_Name.base_name name), rec_fn_Ts @ [T] ---> T', NoSyn))
           (reccomb_names ~~ recTs ~~ rec_result_Ts))
-      |> (Global_Theory.add_defs false o map Thm.no_attributes) (map (fn ((((name, comb), set), T), T') =>
+      |> fold_map Global_Theory.add_def (map (fn ((((name, comb), set), T), T') =>
           (Binding.name (Long_Name.base_name name ^ "_def"), Logic.mk_equals (comb, absfree ("x", T)
            (Const (\<^const_name>\<open>The\<close>, (T' --> HOLogic.boolT) --> T') $ absfree ("y", T')
              (set $ Free ("x", T) $ Free ("y", T'))))))

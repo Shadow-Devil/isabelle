@@ -24,7 +24,7 @@ inductive finite :: "'a set \<Rightarrow> bool"
 
 end
 
-simproc_setup finite_Collect ("finite (Collect P)") = \<open>K Set_Comprehension_Pointfree.simproc\<close>
+simproc_setup finite_Collect ("finite (Collect P)") = \<open>K Set_Comprehension_Pointfree.proc\<close>
 
 declare [[simproc del: finite_Collect]]
 
@@ -1032,6 +1032,22 @@ end
 
 text \<open>Other properties of \<^const>\<open>fold\<close>:\<close>
 
+lemma finite_set_fold_single [simp]: "Finite_Set.fold f z {x} = f x z"
+proof -
+  have "fold_graph f z {x} (f x z)"
+    by (auto intro: fold_graph.intros)
+  moreover
+  {
+    fix X y
+    have "fold_graph f z X y \<Longrightarrow> (X = {} \<longrightarrow> y = z) \<and> (X = {x} \<longrightarrow> y = f x z)"
+      by (induct rule: fold_graph.induct) auto
+  }
+  ultimately have "(THE y. fold_graph f z {x} y) = f x z"
+    by blast
+  thus ?thesis
+    by (simp add: Finite_Set.fold_def)
+qed
+
 lemma fold_graph_image:
   assumes "inj_on g A"
   shows "fold_graph f z (g ` A) = fold_graph (f \<circ> g) z A"
@@ -1872,6 +1888,11 @@ proof -
   with assms show ?thesis
     by (simp add: card_Diff_subset)
 qed
+
+lemma card_Int_Diff:
+  assumes "finite A"
+  shows "card A = card (A \<inter> B) + card (A - B)"
+  by (simp add: assms card_Diff_subset_Int card_mono)
 
 lemma diff_card_le_card_Diff:
   assumes "finite B"

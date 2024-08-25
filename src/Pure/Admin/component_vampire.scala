@@ -8,7 +8,8 @@ package isabelle
 
 
 object Component_Vampire {
-  val default_download_url = "https://github.com/vprover/vampire/archive/refs/tags/v4.6.tar.gz"
+  val default_download_url = "https://github.com/vprover/vampire/archive/refs/tags/v4.8HO4Sledgahammer.tar.gz"
+  val default_version = "4.8"
   val default_jobs = 1
 
   def make_component_name(version: String): String =
@@ -21,6 +22,7 @@ object Component_Vampire {
     download_url: String = default_download_url,
     jobs: Int = default_jobs,
     component_name: String = "",
+    component_version: String = default_version,
     progress: Progress = new Progress,
     target_dir: Path = Path.current
   ): Unit = {
@@ -30,7 +32,6 @@ object Component_Vampire {
       /* component */
 
       val Archive_Name = """^.*?([^/]+)$""".r
-      val Version = """^v?([0-9.]+)\.tar.gz$""".r
 
       val archive_name =
         download_url match {
@@ -38,23 +39,16 @@ object Component_Vampire {
           case _ => error("Failed to determine source archive name from " + quote(download_url))
         }
 
-      val version =
-        archive_name match {
-          case Version(version) => version
-          case _ => error("Failed to determine component version from " + quote(archive_name))
-        }
+      if (component_version.isEmpty) error("Missing component version")
 
-      val component = proper_string(component_name) getOrElse make_component_name(version)
+      val component = proper_string(component_name) getOrElse make_component_name(component_version)
       val component_dir =
         Components.Directory(target_dir + Path.basic(component)).create(progress = progress)
 
 
       /* platform */
 
-      val platform_name =
-        proper_string(Isabelle_System.getenv("ISABELLE_PLATFORM64")) getOrElse
-          error("No 64bit platform")
-
+      val platform_name = Isabelle_Platform.self.ISABELLE_PLATFORM()
       val platform_dir =
         Isabelle_System.make_directory(component_dir.path + Path.basic(platform_name))
 
@@ -76,7 +70,9 @@ object Component_Vampire {
 
       Isabelle_System.copy_file(source_dir + Path.explode("LICENCE"), component_dir.path)
 
-      val cmake_opts = if (Platform.is_linux) "-DBUILD_SHARED_LIBS=0 " else ""
+      val cmake_opts =
+        "-DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_HOL=On -DCMAKE_DISABLE_FIND_PACKAGE_Z3=ON " +
+        (if (Platform.is_linux) "-DBUILD_SHARED_LIBS=0 " else "")
       val cmake_out =
         progress.bash("cmake " + cmake_opts + """-G "Unix Makefiles" .""",
           cwd = source_dir.file, echo = progress.verbose).check.out
@@ -96,6 +92,7 @@ object Component_Vampire {
 
       component_dir.write_settings("""
 VAMPIRE_HOME="$COMPONENT/$ISABELLE_PLATFORM64"
+VAMPIRE_VERSION=""" + quote(component_version) + """
 
 ISABELLE_VAMPIRE="$VAMPIRE_HOME/vampire"
 """)
@@ -104,8 +101,8 @@ ISABELLE_VAMPIRE="$VAMPIRE_HOME/vampire"
       /* README */
 
       File.write(component_dir.README,
-        "This Isabelle component provides Vampire " + version + """using the
-original sources from """.stripMargin + download_url + """
+        "This Isabelle component provides Vampire " + component_version + """ using the
+original sources from """ + download_url + """
 
 The executables have been built via "cmake . && make"
 
@@ -126,6 +123,7 @@ The executables have been built via "cmake . && make"
       var download_url = default_download_url
       var jobs = default_jobs
       var component_name = ""
+      var component_version = default_version
       var verbose = false
 
       val getopts = Getopts("""
@@ -137,6 +135,7 @@ Usage: isabelle component_vampire [OPTIONS]
                  (default: """" + default_download_url + """")
     -j NUMBER    parallel jobs for make (default: """ + default_jobs + """)
     -n NAME      component name (default: """" + make_component_name("VERSION") + """")
+    -V VERSION   component version (default: """ + default_version + """)
     -v           verbose
 
   Build prover component from official download.
@@ -145,6 +144,7 @@ Usage: isabelle component_vampire [OPTIONS]
         "U:" -> (arg => download_url = arg),
         "j:" -> (arg => jobs = Value.Nat.parse(arg)),
         "n:" -> (arg => component_name = arg),
+        "V:" -> (arg => component_version = arg),
         "v" -> (_ => verbose = true))
 
       val more_args = getopts(args)
@@ -153,6 +153,7 @@ Usage: isabelle component_vampire [OPTIONS]
       val progress = new Console_Progress(verbose = verbose)
 
       build_vampire(download_url = download_url, component_name = component_name,
-        jobs = jobs, progress = progress, target_dir = target_dir)
+        component_version = component_version, jobs = jobs, progress = progress,
+        target_dir = target_dir)
     })
 }

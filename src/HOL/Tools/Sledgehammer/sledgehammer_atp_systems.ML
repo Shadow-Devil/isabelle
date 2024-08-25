@@ -1,6 +1,7 @@
 (*  Title:      HOL/Tools/Sledgehammer/sledgehammer_atp_systems.ML
     Author:     Fabian Immler, TU Muenchen
     Author:     Jasmin Blanchette, TU Muenchen
+    Author:     Martin Desharnais, MPI-INF Saarbruecken
 
 Setup for supported ATPs.
 *)
@@ -60,9 +61,12 @@ open ATP_Problem_Generate
 val TF0 = TFF (Monomorphic, Without_FOOL)
 val TF1 = TFF (Polymorphic, Without_FOOL)
 val TX0 = TFF (Monomorphic, With_FOOL {with_ite = true, with_let = true})
+val TX0_MINUS = TFF (Monomorphic, With_FOOL {with_ite = false, with_let = false})
 val TX1 = TFF (Polymorphic, With_FOOL {with_ite = true, with_let = true})
 val TH0 = THF (Monomorphic, {with_ite = true, with_let = true}, THF_With_Choice)
+val TH0_MINUS = THF (Monomorphic, {with_ite = false, with_let = false}, THF_Without_Choice)
 val TH1 = THF (Polymorphic, {with_ite = true, with_let = true}, THF_With_Choice)
+val TH1_MINUS = THF (Polymorphic, {with_ite = false, with_let = false}, THF_Without_Choice)
 
 val default_max_mono_iters = 3 (* FUDGE *)
 val default_max_new_mono_instances = 100 (* FUDGE *)
@@ -174,7 +178,9 @@ val alt_ergo = (alt_ergoN, fn () => alt_ergo_config)
 
 (* E *)
 
-val e_config : atp_config =
+local
+
+fun make_e_config max_new_mono_insts good_slices : atp_config =
   {exec = (["E_HOME"], ["eprover-ho", "eprover"]),
    arguments = fn abduce => fn _ => fn extra_options => fn timeout => fn problem =>
      ["--tstp-in --tstp-out --silent " ^
@@ -192,8 +198,11 @@ val e_config : atp_config =
      known_szs_status_failures,
    prem_role = Conjecture,
    generate_isabelle_info = false,
-   good_slices =
-     let
+   good_slices = K good_slices,
+   good_max_mono_iters = default_max_mono_iters,
+   good_max_new_mono_instances = max_new_mono_insts}
+
+val old_e_config : atp_config = make_e_config default_max_new_mono_instances (let
        val (format, type_enc, lam_trans, extra_options) =
          if string_ord (getenv "E_VERSION", "3.0") <> LESS then
            (* '$ite' support appears to be unsound. *)
@@ -204,17 +213,47 @@ val e_config : atp_config =
            (THF (Monomorphic, {with_ite = false, with_let = false}, THF_Lambda_Free), "mono_native_higher", combsN, "--auto-schedule")
      in
        (* FUDGE *)
-       K [((1000 (* infinity *), false, false, 512, meshN), (format, type_enc, lam_trans, false, extra_options)),
-         ((1, true, false, 128, mashN), (format, type_enc, combsN, false, extra_options)),
-         ((1000 (* infinity *), false, false, 1024, meshN), (format, type_enc, lam_trans, false, extra_options)),
-         ((1000 (* infinity *), false, false, 64, mepoN), (format, type_enc, lam_trans, false, extra_options)),
-         ((1000 (* infinity *), false, false, 724, meshN), (TF0, "poly_guards??", lam_trans, false, extra_options)),
-         ((1000 (* infinity *), false, true, 256, mepoN), (format, type_enc, liftingN, false, extra_options))]
-     end,
-   good_max_mono_iters = default_max_mono_iters,
-   good_max_new_mono_instances = default_max_new_mono_instances}
+       [((1000 (* infinity *), false, false, 512, meshN), (format, type_enc, lam_trans, false, extra_options)),
+        ((1, true, false, 128, mashN), (format, type_enc, combsN, false, extra_options)),
+        ((1000 (* infinity *), false, false, 1024, meshN), (format, type_enc, lam_trans, false, extra_options)),
+        ((1000 (* infinity *), false, false, 64, mepoN), (format, type_enc, lam_trans, false, extra_options)),
+        ((1000 (* infinity *), false, false, 724, meshN), (TF0, "poly_guards??", lam_trans, false, extra_options)),
+        ((1000 (* infinity *), false, true, 256, mepoN), (format, type_enc, liftingN, false, extra_options))]
+     end)
 
-val e = (eN, fn () => e_config)
+val new_e_config : atp_config =
+  (* FUDGE: this solved 950/1500 (63.33 %) using MePo when testing *)
+  make_e_config 128
+    [(((2, false, false,  128, meshN), (TX0_MINUS, "mono_native_fool", liftingN, false, ""))),
+     (((2, false, false, 1024, meshN), (TH0, "mono_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false,  128, meshN), (TH0_MINUS, "mono_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false, 2048, meshN), (TF0, "mono_native", combsN, false, ""))),
+     (((2, false, false,  512, meshN), (TF0, "mono_native", liftingN, false, ""))),
+     (((2, false, false, 1024, meshN), (TX0_MINUS, "mono_native_fool", liftingN, false, ""))),
+     (((2, false, false,   64, meshN), (TH0, "mono_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false,  512, meshN), (TH0_MINUS, "mono_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false,   32, meshN), (TF0, "mono_native", liftingN, false, ""))),
+     (((2, false, false, 2048, meshN), (TH0, "mono_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false,  256, meshN), (TH0, "mono_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false,  512, meshN), (TF0, "mono_native", combsN, false, ""))),
+     (((2, false, false, 1024, meshN), (TF0, "mono_native", liftingN, false, ""))),
+     (((2, false, false,   16, meshN), (TH0, "mono_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false,  512, meshN), (TX0_MINUS, "mono_native_fool", liftingN, false, ""))),
+     (((2, false, false,   64, meshN), (TF0, "mono_native", liftingN, false, ""))),
+     (((2, false, false,  128, meshN), (TF0, "mono_native", combsN, false, ""))),
+     (((2, false, false, 2048, meshN), (TH0_MINUS, "mono_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false,  128, meshN), (TX0_MINUS, "mono_native_fool", combsN, false, ""))),
+     (((2, false, false, 2048, meshN), (TX0_MINUS, "mono_native_fool", liftingN, false, "")))]
+
+in
+
+val e = (eN, fn () =>
+  if string_ord (getenv "E_VERSION", "3.0") <> LESS then
+    new_e_config
+  else
+    old_e_config)
+
+end
 
 
 (* iProver *)
@@ -361,21 +400,35 @@ val spass = (spassN, fn () => spass_config)
 
 (* Vampire *)
 
-val vampire_basic_options =
-  "--proof tptp --output_axiom_names on" ^
+local
+
+val old_vampire_basic_options =
+  ["--proof tptp",
+   "--output_axiom_names on"] @
   (if ML_System.platform_is_windows
-   then ""  (*time slicing is not support in the Windows version of Vampire*)
-   else " --mode casc")
+   then []  (*time slicing is not support in the Windows version of Vampire*)
+   else ["--mode casc"])
+
+val new_vampire_basic_options =
+  ["--input_syntax tptp",
+   "--proof tptp",
+   "--output_axiom_names on"] @
+  (if ML_System.platform_is_windows
+   then []  (*time slicing is not support in the Windows version of Vampire*)
+   else ["--mode portfolio", "--schedule snake_slh"])
 
 val vampire_full_proof_options =
-  " --proof_extra free --forced_options avatar=off:equality_proxy=off:general_splitting=off:inequality_splitting=0:naming=0"
+  ["--proof_extra free",
+   "--forced_options avatar=off:equality_proxy=off:general_splitting=off:inequality_splitting=0:naming=0"]
 
-val vampire_config : atp_config =
+fun make_vampire_config vampire_basic_options good_max_new_mono_instances good_slices : atp_config =
   {exec = (["VAMPIRE_HOME"], ["vampire"]),
-   arguments = fn _ => fn full_proofs => fn sos => fn timeout => fn problem =>
-     [vampire_basic_options ^ (if full_proofs then " " ^ vampire_full_proof_options else "") ^
-       " -t " ^ string_of_int (to_secs 1 timeout) ^ " --input_file " ^ File.bash_path problem
-       |> sos = sosN ? prefix "--sos on "],
+   arguments = fn _ => fn full_proofs => fn extra_options => fn timeout => fn problem =>
+     vampire_basic_options @
+     (if full_proofs then vampire_full_proof_options else []) @
+     (if extra_options <> "" then [extra_options] else []) @
+     ["-t " ^ string_of_int (to_secs 1 timeout),
+      "--input_file " ^ File.bash_path problem],
    proof_delims =
      [("=========== Refutation ==========",
        "======= End of refutation =======")] @
@@ -389,28 +442,54 @@ val vampire_config : atp_config =
      known_szs_status_failures,
    prem_role = Hypothesis,
    generate_isabelle_info = false,
-   good_slices =
-     let
-       (* Older versions of Vampire have unsound handling of Booleans. *)
-       val mono_native =
-         if string_ord (getenv "VAMPIRE_VERSION", "4.8") <> LESS then "mono_native_fool"
-         else "mono_native"
-     in
-       (* FUDGE *)
-       K [((2, false, false, 512, meshN), (TX1, mono_native, combsN, false, sosN)),
-        ((2, false, false, 1024, meshN), (TX1, mono_native, liftingN, false, sosN)),
-        ((2, false, false, 256, mashN), (TX1, mono_native, liftingN, false, no_sosN)),
-        ((2, false, true, 512, mepoN), (TF1, "poly_native", liftingN, false, no_sosN)),
-        ((2, false, false, 16, meshN), (TX1, mono_native, liftingN, false, no_sosN)),
-        ((2, false, false, 32, meshN), (TX1, mono_native, combsN, false, no_sosN)),
-        ((2, false, false, 64, meshN), (TX1, mono_native, combs_or_liftingN, false, no_sosN)),
-        ((2, false, false, 128, meshN), (TX1, mono_native, liftingN, false, no_sosN))]
-      end,
+   good_slices = K good_slices,
    good_max_mono_iters = default_max_mono_iters,
-   good_max_new_mono_instances = 2 * default_max_new_mono_instances (* FUDGE *)}
+   good_max_new_mono_instances = good_max_new_mono_instances}
 
-val vampire = (vampireN, fn () => vampire_config)
+val old_vampire_config : atp_config =
+  (* FUDGE *)
+  make_vampire_config old_vampire_basic_options (2 * default_max_new_mono_instances)
+  [((2, false, false, 512, meshN), (TX1, "mono_native", combsN, false, sosN)),
+   ((2, false, false, 1024, meshN), (TX1, "mono_native", liftingN, false, sosN)),
+   ((2, false, false, 256, mashN), (TX1, "mono_native", liftingN, false, no_sosN)),
+   ((2, false, true, 512, mepoN), (TF1, "poly_native", liftingN, false, no_sosN)),
+   ((2, false, false, 16, meshN), (TX1, "mono_native", liftingN, false, no_sosN)),
+   ((2, false, false, 32, meshN), (TX1, "mono_native", combsN, false, no_sosN)),
+   ((2, false, false, 64, meshN), (TX1, "mono_native", combs_or_liftingN, false, no_sosN)),
+   ((2, false, false, 128, meshN), (TX1, "mono_native", liftingN, false, no_sosN))]
 
+val new_vampire_config : atp_config =
+  (* FUDGE: this solved 998/1500 (66.53 %) using MePo when testing *)
+  make_vampire_config new_vampire_basic_options 256
+    [(((2, false, false,  512, meshN), (TX0, "mono_native_fool", liftingN, false, ""))),
+     (((2, false, false, 2048, meshN), (TX0, "mono_native_fool", combsN, false, ""))),
+     (((2, false, false,  128, meshN), (TX0, "mono_native_fool", liftingN, false, ""))),
+     (((2, false, false, 1024, meshN), (TF1, "poly_native", liftingN, false, ""))),
+     (((2, false, false,  256, meshN), (TH0_MINUS, "mono_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false, 1024, meshN), (TX0, "mono_native_fool", liftingN, false, ""))),
+     (((2, false, false,  256, meshN), (TX0, "mono_native_fool", liftingN, false, ""))),
+     (((2, false, false, 2048, meshN), (TF1, "poly_native", combsN, false, ""))),
+     (((2, false, false,  256, meshN), (TX1, "poly_native_fool", liftingN, false, ""))),
+     (((2, false, false,  512, meshN), (TF0, "mono_native", liftingN, false, ""))),
+     (((2, false, false, 2048, meshN), (TF0, "mono_native", liftingN, false, ""))),
+     (((2, false, false,   64, meshN), (TF1, "poly_native", combsN, false, ""))),
+     (((2, false, false,  256, meshN), (TH1_MINUS, "poly_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false,  256, meshN), (TF0, "mono_native", combsN, false, ""))),
+     (((2, false, false,  256, meshN), (TF0, "mono_native", liftingN, false, ""))),
+     (((2, false, false,   32, meshN), (TH0_MINUS, "mono_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false,  512, meshN), (TH0_MINUS, "mono_native_higher", keep_lamsN, false, ""))),
+     (((2, false, false,  512, meshN), (TX0, "mono_native_fool", combsN, false, ""))),
+     (((2, false, false, 1024, meshN), (TX1, "poly_native_fool", combsN, false, "")))]
+
+in
+
+val vampire = (vampireN, fn () =>
+  if string_ord (getenv "VAMPIRE_VERSION", "4.8") <> LESS then
+    new_vampire_config
+  else
+    old_vampire_config)
+
+end
 
 (* Zipperposition *)
 

@@ -28,6 +28,8 @@ ML_file "Concurrent/multithreading.ML";
 ML_file "Concurrent/unsynchronized.ML";
 ML_file "Concurrent/synchronized.ML";
 ML_file "Concurrent/counter.ML";
+ML_file "Concurrent/single_assignment.ML";
+ML_file "Concurrent/isabelle_thread.ML";
 
 ML_file "ML/ml_heap.ML";
 ML_file "ML/ml_print_depth0.ML";
@@ -44,6 +46,7 @@ ML_file "General/print_mode.ML";
 ML_file "General/integer.ML";
 ML_file "General/alist.ML";
 ML_file "General/table.ML";
+ML_file "General/bitset.ML";
 ML_file "General/set.ML";
 
 ML_file "General/random.ML";
@@ -98,7 +101,6 @@ ML_file "ML/ml_profiling.ML";
 ML_file "PIDE/byte_message.ML";
 ML_file "PIDE/protocol_message.ML";
 ML_file "PIDE/document_id.ML";
-ML_file "General/socket_io.ML";
 
 ML_file "General/graph.ML";
 
@@ -121,8 +123,6 @@ ML_file "ML/exn_properties.ML";
 ML_file_no_debug "ML/exn_debugger.ML";
 
 ML_file "Concurrent/thread_data_virtual.ML";
-ML_file "Concurrent/isabelle_thread.ML";
-ML_file "Concurrent/single_assignment.ML";
 
 ML_file "Concurrent/par_exn.ML";
 ML_file "Concurrent/task_queue.ML";
@@ -136,7 +136,7 @@ ML_file "Concurrent/mailbox.ML";
 ML_file "Concurrent/cache.ML";
 
 ML_file "PIDE/active.ML";
-ML_file "Thy/export.ML";
+ML_file "Build/export.ML";
 
 
 subsection "Inner syntax";
@@ -168,14 +168,16 @@ ML_file "net.ML";
 ML_file "item_net.ML";
 ML_file "envir.ML";
 ML_file "consts.ML";
-ML_file "term_xml.ML";
 ML_file "primitive_defs.ML";
 ML_file "sign.ML";
 ML_file "defs.ML";
-ML_file "term_sharing.ML";
 ML_file "pattern.ML";
 ML_file "unify.ML";
 ML_file "theory.ML";
+ML_file "term_sharing.ML";
+ML_file "term_xml.ML";
+ML_file "thm_name.ML";
+ML_file "zterm.ML";
 ML_file "proofterm.ML";
 ML_file "thm.ML";
 ML_file "cterm_items.ML";
@@ -184,7 +186,6 @@ ML_file "more_unify.ML";
 ML_file "more_thm.ML";
 
 ML_file "facts.ML";
-ML_file "thm_name.ML";
 ML_file "global_theory.ML";
 ML_file "pure_thy.ML";
 ML_file "drule.ML";
@@ -240,7 +241,7 @@ ML_file "Isar/entity.ML";
 ML_file "PIDE/command_span.ML";
 ML_file "Thy/thy_element.ML";
 ML_file "Thy/markdown.ML";
-ML_file "Thy/latex.ML";
+ML_file "General/latex.ML";
 
 (*ML with context and antiquotations*)
 ML_file "ML/ml_context.ML";
@@ -277,6 +278,7 @@ ML_file "Isar/interpretation.ML";
 ML_file "Isar/class_declaration.ML";
 ML_file "Isar/target_context.ML";
 ML_file "Isar/experiment.ML";
+ML_file "ML/ml_thms.ML";
 ML_file "simplifier.ML";
 ML_file "Tools/plugin.ML";
 
@@ -300,6 +302,7 @@ ML_file "Proof/proof_checker.ML";
 ML_file "Proof/extraction.ML";
 
 (*Isabelle system*)
+ML_file "General/socket_io.ML";
 ML_file "PIDE/protocol_command.ML";
 ML_file "System/java.ML";
 ML_file "System/scala.ML";
@@ -315,19 +318,18 @@ ML_file "Thy/document_output.ML";
 ML_file "Thy/document_antiquotations.ML";
 ML_file "General/graph_display.ML";
 ML_file "pure_syn.ML";
-ML_file "PIDE/resources.ML";
+ML_file "Build/resources.ML";
 ML_file "PIDE/command.ML";
 ML_file "PIDE/query_operation.ML";
 ML_file "Thy/thy_info.ML";
 ML_file "thm_deps.ML";
-ML_file "Thy/export_theory.ML";
-ML_file "Thy/sessions.ML";
+ML_file "Build/export_theory.ML";
+ML_file "Build/sessions.ML";
 ML_file "PIDE/session.ML";
 ML_file "PIDE/document.ML";
 
 (*ML add-ons*)
 ML_file "ML/ml_pp.ML";
-ML_file "ML/ml_thms.ML";
 ML_file "ML/ml_instantiate.ML";
 ML_file "ML/ml_file.ML";
 ML_file "ML/ml_pid.ML";
@@ -343,7 +345,7 @@ ML_file "System/message_channel.ML";
 ML_file "System/isabelle_process.ML";
 ML_file "System/scala_compiler.ML";
 ML_file "System/isabelle_tool.ML";
-ML_file "Thy/bibtex.ML";
+ML_file "Build/build.ML";
 ML_file "PIDE/protocol.ML";
 ML_file "General/output_primitives_virtual.ML";
 
@@ -351,10 +353,10 @@ ML_file "General/output_primitives_virtual.ML";
 subsection "Miscellaneous tools and packages for Pure Isabelle";
 
 ML_file "General/base64.ML";
+ML_file "General/bibtex.ML";
 ML_file "General/xz.ML";
 ML_file "General/zstd.ML";
 ML_file "Tools/prismjs.ML";
-ML_file "Tools/build.ML";
 ML_file "Tools/named_thms.ML";
 ML_file "Tools/print_operation.ML";
 ML_file "Tools/rail.ML";

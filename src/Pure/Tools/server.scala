@@ -91,28 +91,28 @@ object Server {
       case _ => JSON.Object.empty
     }
 
-  object Reply extends Enumeration {
-    val OK, ERROR, FINISHED, FAILED, NOTE = Value
-
+  object Reply {
     def message(msg: String, kind: String = ""): JSON.Object.T =
       JSON.Object(Markup.KIND -> proper_string(kind).getOrElse(Markup.WRITELN), "message" -> msg)
 
     def error_message(msg: String): JSON.Object.T =
       message(msg, kind = Markup.ERROR)
 
-    def unapply(msg: String): Option[(Reply.Value, Any)] = {
+    def unapply(msg: String): Option[(Reply, Any)] = {
       if (msg == "") None
       else {
         val (name, argument) = Argument.split(msg)
         for {
           reply <-
-            try { Some(withName(name)) }
-            catch { case _: NoSuchElementException => None }
+            try { Some(Reply.valueOf(name)) }
+            catch { case _: IllegalArgumentException => None }
           arg <- Argument.unapply(argument)
         } yield (reply, arg)
       }
     }
   }
+
+  enum Reply { case OK, ERROR, FINISHED, FAILED, NOTE }
 
 
   /* handler: port, password, thread */
@@ -121,7 +121,7 @@ object Server {
     val socket: ServerSocket = new ServerSocket(port0, 50, Server.localhost)
     def port: Int = socket.getLocalPort
     def address: String = print_address(port)
-    val password: String = UUID.random().toString
+    val password: String = UUID.random_string()
 
     override def toString: String = print(port, password)
 
@@ -194,7 +194,7 @@ object Server {
     def write_byte_message(chunks: List[Bytes]): Unit =
       out_lock.synchronized { Byte_Message.write_message(out, chunks) }
 
-    def reply(r: Reply.Value, arg: Any): Unit = {
+    def reply(r: Reply, arg: Any): Unit = {
       val argument = Argument.print(arg)
       write_line_message(if (argument == "") r.toString else r.toString + " " + argument)
     }
@@ -216,7 +216,7 @@ object Server {
 
     def command_list: List[String] = command_table.keys.toList.sorted
 
-    def reply(r: Reply.Value, arg: Any): Unit = connection.reply(r, arg)
+    def reply(r: Reply, arg: Any): Unit = connection.reply(r, arg)
     def notify(arg: Any): Unit = connection.notify(arg)
     def message(kind: String, msg: String, more: JSON.Object.Entry*): Unit =
       notify(Reply.message(msg, kind = kind) ++ more)
@@ -366,7 +366,7 @@ object Server {
   object private_data extends SQL.Data() {
     val database = Path.explode("$ISABELLE_HOME_USER/servers.db")
 
-    override lazy val tables = SQL.Tables(Base.table)
+    override lazy val tables: SQL.Tables = SQL.Tables(Base.table)
 
     object Base {
       val name = SQL.Column.string("name").make_primary_key
@@ -397,7 +397,7 @@ object Server {
     name: String = default_name,
     port: Int = 0,
     existing_server: Boolean = false,
-    log: Logger = No_Logger
+    log: Logger = new Logger
   ): (Info, Option[Server]) = {
     using(SQLite.open_database(private_data.database, restrict = true)) { db =>
       private_data.transaction_lock(db, create = true) {
@@ -495,7 +495,7 @@ Usage: isabelle server [OPTIONS]
           sys.exit(if (ok) Process_Result.RC.ok else Process_Result.RC.failure)
         }
         else {
-          val log = Logger.make(log_file)
+          val log = Logger.make_file(log_file)
           val (server_info, server) =
             init(name, port = port, existing_server = existing_server, log = log)
           Output.writeln(server_info.toString, stdout = true)

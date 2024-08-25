@@ -58,15 +58,15 @@ sig
   val mk_arities: arity -> term list
   val mk_arity: string * sort list * class -> term
   val dest_arity: term -> string * sort list * class
+  val present_sorts: sort Ord_List.T -> Types.set ->
+    {present: (typ * sort) list, extra: sort Ord_List.T}
   val dummy_tfree: sort -> typ
   type unconstrain_context =
-   {present_map: (typ * typ) list,
-    constraints_map: (sort * typ) list,
-    atyp_map: typ -> typ,
-    map_atyps: typ -> typ,
+   {typ_operation: {strip_sorts: bool} -> typ Same.operation,
     constraints: ((typ * class) * term) list,
-    outer_constraints: (typ * class) list};
-  val unconstrainT: sort list -> term -> unconstrain_context * term
+    outer_constraints: (typ * class) list}
+  val unconstrain_context: sort Ord_List.T -> Types.set -> unconstrain_context
+  val unconstrainT: sort Ord_List.T -> term -> unconstrain_context * term
   val protectC: term
   val protect: term -> term
   val unprotect: term -> term
@@ -78,8 +78,9 @@ sig
   val rlist_abs: (string * typ) list * term -> term
   val incr_tvar_same: int -> typ Same.operation
   val incr_tvar: int -> typ -> typ
-  val incr_indexes_same: string list * typ list * int -> term Same.operation
-  val incr_indexes: string list * typ list * int -> term -> term
+  val incr_indexes_operation: {fixed: string list, Ts: typ list, inc: int, level: int} ->
+    term Same.operation
+  val incr_indexes: typ list * int -> term -> term
   val lift_abs: int -> term -> term -> term
   val lift_all: int -> term -> term -> term
   val strip_assums_hyp: term -> term list
@@ -350,41 +351,44 @@ fun dest_arity tm =
   in (t, Ss, c) end;
 
 
-(* internalized sort constraints *)
+(* sort constraints within the logic *)
 
 fun dummy_tfree S = TFree ("'dummy", S);
 
+fun present_sorts shyps present_set =
+  let
+    val present = map (fn T => (T, Type.sort_of_atyp T)) (Types.list_set present_set);
+    val extra = fold (Sorts.remove_sort o #2) present shyps;
+  in {present = present, extra = extra} end;
+
 type unconstrain_context =
- {present_map: (typ * typ) list,
-  constraints_map: (sort * typ) list,
-  atyp_map: typ -> typ,
-  map_atyps: typ -> typ,
+ {typ_operation: {strip_sorts: bool} -> typ Same.operation,
   constraints: ((typ * class) * term) list,
   outer_constraints: (typ * class) list};
 
-fun unconstrainT shyps prop =
+fun unconstrain_context shyps present_set =
   let
-    val present = rev ((fold_types o fold_atyps_sorts) (insert (eq_fst op =)) prop []);
-    val extra = fold (Sorts.remove_sort o #2) present shyps;
+    val {present, extra} = present_sorts shyps present_set;
 
-    val n = length present;
+    val n = Types.size present_set;
     val (names1, names2) = Name.invent Name.context Name.aT (n + length extra) |> chop n;
 
     val present_map =
       map2 (fn (T, S) => fn a => (T, TVar ((a, 0), S))) present names1;
     val constraints_map =
-      map2 (fn (_, S) => fn a => (S, TVar ((a, 0), S))) present names1 @
+      map (fn (_, V) => (Type.sort_of_atyp V, V)) present_map @
       map2 (fn S => fn a => (S, TVar ((a, 0), S))) extra names2;
 
-    fun atyp_map T =
-      (case AList.lookup (op =) present_map T of
-        SOME U => U
-      | NONE =>
-          (case AList.lookup (op =) constraints_map (Type.sort_of_atyp T) of
-            SOME U => U
-          | NONE => raise TYPE ("Dangling type variable ", [T], [prop])));
+    fun atyp_operation {strip_sorts} =
+      Same.function_eq (op =) (fn T =>
+        (case AList.lookup (op =) present_map T of
+          SOME T' => T' |> strip_sorts ? Term.strip_sortsT
+        | NONE =>
+            (case AList.lookup (op =) constraints_map (Type.sort_of_atyp T) of
+              SOME T' => T' |> strip_sorts ? Term.strip_sortsT
+            | NONE => raise TYPE ("Dangling type variable ", [T], []))));
 
-    val map_atyps = Term.map_atyps (Type.strip_sorts o atyp_map);
+    val typ_operation = Term.map_atyps_same o atyp_operation;
 
     val constraints =
       constraints_map |> maps (fn (_, T as TVar (ai, S)) =>
@@ -392,17 +396,18 @@ fun unconstrainT shyps prop =
 
     val outer_constraints =
       maps (fn (T, S) => map (pair T) S) (present @ map (`dummy_tfree) extra);
+  in
+   {typ_operation = typ_operation,
+    constraints = constraints,
+    outer_constraints = outer_constraints}
+  end;
 
-    val ucontext =
-     {present_map = present_map,
-      constraints_map = constraints_map,
-      atyp_map = atyp_map,
-      map_atyps = map_atyps,
-      constraints = constraints,
-      outer_constraints = outer_constraints};
+fun unconstrainT shyps prop =
+  let
+    val ucontext = unconstrain_context shyps (Types.build (prop |> Types.add_atyps));
     val prop' = prop
-      |> Term.map_types map_atyps
-      |> curry list_implies (map #2 constraints);
+      |> Term.map_types (#typ_operation ucontext {strip_sorts = true})
+      |> curry list_implies (map #2 (#constraints ucontext));
   in (ucontext, prop') end;
 
 
@@ -446,37 +451,40 @@ fun rlist_abs ([], body) = body
   | rlist_abs ((a,T)::pairs, body) = rlist_abs(pairs, Abs(a, T, body));
 
 fun incr_tvar_same 0 = Same.same
-  | incr_tvar_same k = Term_Subst.map_atypsT_same
-      (fn TVar ((a, i), S) => TVar ((a, i + k), S)
+  | incr_tvar_same inc = Term.map_atyps_same
+      (fn TVar ((a, i), S) => TVar ((a, i + inc), S)
         | _ => raise Same.SAME);
 
-fun incr_tvar k T = incr_tvar_same k T handle Same.SAME => T;
+fun incr_tvar inc = Same.commit (incr_tvar_same inc);
 
 (*For all variables in the term, increment indexnames and lift over the Us
     result is ?Gidx(B.(lev+n-1),...,B.lev) where lev is abstraction level *)
-fun incr_indexes_same ([], [], 0) = Same.same
-  | incr_indexes_same (fixed, Ts, k) =
-      let
-        val n = length Ts;
-        val incrT = incr_tvar_same k;
+fun incr_indexes_operation {fixed, Ts, inc, level} =
+  if null fixed andalso null Ts andalso inc = 0 then Same.same
+  else
+    let
+      val n = length Ts;
+      val incrT = incr_tvar_same inc;
 
-        fun incr lev (Var ((x, i), T)) =
-              combound (Var ((x, i + k), Ts ---> Same.commit incrT T), lev, n)
-          | incr lev (Free (x, T)) =
-              if member (op =) fixed x then
-                combound (Free (x, Ts ---> Same.commit incrT T), lev, n)
-              else Free (x, incrT T)
-          | incr lev (Abs (x, T, body)) =
-              (Abs (x, incrT T, incr (lev + 1) body handle Same.SAME => body)
-                handle Same.SAME => Abs (x, T, incr (lev + 1) body))
-          | incr lev (t $ u) =
-              (incr lev t $ (incr lev u handle Same.SAME => u)
-                handle Same.SAME => t $ incr lev u)
-          | incr _ (Const (c, T)) = Const (c, incrT T)
-          | incr _ (Bound _) = raise Same.SAME;
-      in incr 0 end;
+      fun incr lev (Var ((x, i), T)) =
+            combound (Var ((x, i + inc), Ts ---> Same.commit incrT T), lev, n)
+        | incr lev (Free (x, T)) =
+            if member (op =) fixed x then
+              combound (Free (x, Ts ---> Same.commit incrT T), lev, n)
+            else Free (x, incrT T)
+        | incr lev (Abs (x, T, t)) =
+            (Abs (x, incrT T, Same.commit (incr (lev + 1)) t)
+              handle Same.SAME => Abs (x, T, incr (lev + 1) t))
+        | incr lev (t $ u) =
+            (incr lev t $ Same.commit (incr lev) u
+              handle Same.SAME => t $ incr lev u)
+        | incr _ (Const (c, T)) = Const (c, incrT T)
+        | incr _ (Bound _) = raise Same.SAME;
+    in incr level end;
 
-fun incr_indexes arg t = incr_indexes_same arg t handle Same.SAME => t;
+fun incr_indexes (Ts, inc) =
+  if null Ts andalso inc = 0 then I
+  else Same.commit (incr_indexes_operation {fixed = [], Ts = Ts, inc = inc, level = 0});
 
 
 (* Lifting functions from subgoal and increment:
@@ -487,14 +495,14 @@ fun lift_abs inc =
   let
     fun lift Ts (Const ("Pure.imp", _) $ _ $ B) t = lift Ts B t
       | lift Ts (Const ("Pure.all", _) $ Abs (a, T, B)) t = Abs (a, T, lift (T :: Ts) B t)
-      | lift Ts _ t = incr_indexes ([], rev Ts, inc) t;
+      | lift Ts _ t = incr_indexes (rev Ts, inc) t;
   in lift [] end;
 
 fun lift_all inc =
   let
     fun lift Ts ((c as Const ("Pure.imp", _)) $ A $ B) t = c $ A $ lift Ts B t
       | lift Ts ((c as Const ("Pure.all", _)) $ Abs (a, T, B)) t = c $ Abs (a, T, lift (T :: Ts) B t)
-      | lift Ts _ t = incr_indexes ([], rev Ts, inc) t;
+      | lift Ts _ t = incr_indexes (rev Ts, inc) t;
   in lift [] end;
 
 (*Strips assumptions in goal, yielding list of hypotheses.   *)
@@ -608,12 +616,12 @@ fun bad_schematic xi = "Illegal schematic variable: " ^ quote (Term.string_of_vn
 fun bad_fixed x = "Illegal fixed variable: " ^ quote x;
 
 fun varifyT_global_same ty = ty
-  |> Term_Subst.map_atypsT_same
+  |> Term.map_atyps_same
     (fn TFree (a, S) => TVar ((a, 0), S)
       | TVar (ai, _) => raise TYPE (bad_schematic ai, [ty], []));
 
 fun unvarifyT_global_same ty = ty
-  |> Term_Subst.map_atypsT_same
+  |> Term.map_atyps_same
     (fn TVar ((a, 0), S) => TFree (a, S)
       | TVar (ai, _) => raise TYPE (bad_schematic ai, [ty], [])
       | TFree (a, _) => raise TYPE (bad_fixed a, [ty], []));
@@ -621,27 +629,27 @@ fun unvarifyT_global_same ty = ty
 val varifyT_global = Same.commit varifyT_global_same;
 val unvarifyT_global = Same.commit unvarifyT_global_same;
 
-fun varify_types_global tm = tm
-  |> Same.commit (Term_Subst.map_types_same varifyT_global_same)
-  handle TYPE (msg, _, _) => raise TERM (msg, [tm]);
+fun varify_types_global tm =
+  Term.map_types varifyT_global_same tm
+    handle TYPE (msg, _, _) => raise TERM (msg, [tm]);
 
-fun unvarify_types_global tm = tm
-  |> Same.commit (Term_Subst.map_types_same unvarifyT_global_same)
-  handle TYPE (msg, _, _) => raise TERM (msg, [tm]);
+fun unvarify_types_global tm =
+  Term.map_types unvarifyT_global_same tm
+    handle TYPE (msg, _, _) => raise TERM (msg, [tm]);
 
 fun varify_global tm = tm
-  |> Same.commit (Term_Subst.map_aterms_same
+  |> Term.map_aterms
     (fn Free (x, T) => Var ((x, 0), T)
       | Var (xi, _) => raise TERM (bad_schematic xi, [tm])
-      | _ => raise Same.SAME))
+      | _ => raise Same.SAME)
   |> varify_types_global;
 
 fun unvarify_global tm = tm
-  |> Same.commit (Term_Subst.map_aterms_same
+  |> Term.map_aterms
     (fn Var ((x, 0), T) => Free (x, T)
       | Var (xi, _) => raise TERM (bad_schematic xi, [tm])
       | Free (x, _) => raise TERM (bad_fixed x, [tm])
-      | _ => raise Same.SAME))
+      | _ => raise Same.SAME)
   |> unvarify_types_global;
 
 

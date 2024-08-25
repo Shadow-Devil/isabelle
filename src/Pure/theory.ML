@@ -10,7 +10,9 @@ sig
   val ancestors_of: theory -> theory list
   val nodes_of: theory -> theory list
   val setup: (theory -> theory) -> unit
+  val setup_result: (theory -> 'a * theory) -> 'a
   val local_setup: (Proof.context -> Proof.context) -> unit
+  val local_setup_result: (Proof.context -> 'a * Proof.context) -> 'a
   val install_pure: theory -> unit
   val get_pure: unit -> theory
   val get_pure_bootstrap: unit -> theory
@@ -36,6 +38,7 @@ sig
   val add_def: Defs.context -> bool -> bool -> binding * term -> theory -> theory
   val specify_const: (binding * typ) * mixfix -> theory -> term * theory
   val check_overloading: Proof.context -> bool -> string * typ -> unit
+  val equality_axioms: (binding * term) list
 end
 
 structure Theory: THEORY =
@@ -49,7 +52,10 @@ val ancestors_of = Context.ancestors_of;
 fun nodes_of thy = thy :: ancestors_of thy;
 
 fun setup f = Context.>> (Context.map_theory f);
+fun setup_result f = Context.>>> (Context.map_theory_result f);
+
 fun local_setup f = Context.>> (Context.map_proof f);
+fun local_setup_result f = Context.>>> (Context.map_proof_result f);
 
 
 (* implicit theory Pure *)
@@ -195,6 +201,7 @@ fun begin_theory (name, pos) imports =
       |> Sign.init_naming
       |> Sign.local_path
       |> apply_wrappers wrappers
+      |> tap (Syntax.cache_syntax o Sign.syntax_of)
     end;
 
 fun end_theory thy =
@@ -349,6 +356,41 @@ fun add_def (context as (ctxt, _)) unchecked overloaded raw_axm thy =
     |> map_defs (check_def context thy unchecked overloaded axm)
     |> add_axiom ctxt axm
   end;
+
+end;
+
+
+(** axioms for equality **)
+
+local
+
+val aT = TFree ("'a", []);
+val bT = TFree ("'b", []);
+val x = Free ("x", aT);
+val y = Free ("y", aT);
+val z = Free ("z", aT);
+val A = Free ("A", propT);
+val B = Free ("B", propT);
+val f = Free ("f", aT --> bT);
+val g = Free ("g", aT --> bT);
+
+in
+
+val equality_axioms =
+ [(Binding.make ("reflexive", \<^here>), Logic.mk_equals (x, x)),
+  (Binding.make ("symmetric", \<^here>),
+    Logic.mk_implies (Logic.mk_equals (x, y), Logic.mk_equals (y, x))),
+  (Binding.make ("transitive", \<^here>),
+    Logic.list_implies ([Logic.mk_equals (x, y), Logic.mk_equals (y, z)], Logic.mk_equals (x, z))),
+  (Binding.make ("equal_intr", \<^here>),
+    Logic.list_implies ([Logic.mk_implies (A, B), Logic.mk_implies (B, A)], Logic.mk_equals (A, B))),
+  (Binding.make ("equal_elim", \<^here>), Logic.list_implies ([Logic.mk_equals (A, B), A], B)),
+  (Binding.make ("abstract_rule", \<^here>),
+    Logic.mk_implies
+      (Logic.all x (Logic.mk_equals (f $ x, g $ x)),
+        Logic.mk_equals (lambda x (f $ x), lambda x (g $ x)))),
+  (Binding.make ("combination", \<^here>), Logic.list_implies
+    ([Logic.mk_equals (f, g), Logic.mk_equals (x, y)], Logic.mk_equals (f $ x, g $ y)))];
 
 end;
 

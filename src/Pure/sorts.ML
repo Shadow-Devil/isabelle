@@ -30,6 +30,8 @@ sig
   val arities_of: algebra -> (class * sort list) list Symtab.table
   val all_classes: algebra -> class list
   val super_classes: algebra -> class -> class list
+  val cert_class: algebra -> class -> class
+  val cert_sort: algebra -> sort -> sort
   val class_less: algebra -> class * class -> bool
   val class_le: algebra -> class * class -> bool
   val sort_eq: algebra -> sort * sort -> bool
@@ -64,7 +66,9 @@ sig
     typ * sort -> 'a list   (*exception CLASS_ERROR*)
   val classrel_derivation: algebra ->
     ('a * class -> class -> 'a) -> 'a * class -> class -> 'a  (*exception CLASS_ERROR*)
-  val witness_sorts: algebra -> string list -> (typ * sort) list -> sort list -> (typ * sort) list
+  val witness_sorts: algebra -> string list ->
+    (typ * sort) list -> sort Ord_List.T ->
+    (typ * sort) list * sort Ord_List.T
 end;
 
 structure Sorts: SORTS =
@@ -132,6 +136,12 @@ fun map_arities f (Algebra {classes, arities}) = make_algebra (classes, f aritie
 fun all_classes (Algebra {classes, ...}) = Graph.all_preds classes (Graph.maximals classes);
 
 val super_classes = Graph.immediate_succs o classes_of;
+
+fun cert_class (Algebra {classes, ...}) c =
+  if Graph.defined classes c then c
+  else raise TYPE ("Undeclared class: " ^ quote c, [], []);
+
+fun cert_sort algebra S = (List.app (ignore o cert_class algebra) S; S);
 
 
 (* class relations *)
@@ -489,6 +499,8 @@ fun witness_sorts algebra ground_types hyps sorts =
                 end
           | NONE => witn_types path ts S solved_failed);
 
-  in map_filter I (#1 (witn_sorts [] sorts ([], []))) end;
+    val witnessed = map_filter I (#1 (witn_sorts [] sorts ([], [])));
+    val non_witnessed = fold (remove_sort o #2) witnessed sorts;
+  in (witnessed, non_witnessed) end;
 
 end;

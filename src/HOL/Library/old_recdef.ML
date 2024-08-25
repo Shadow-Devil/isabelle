@@ -755,7 +755,7 @@ fun dest_relation tm =
         end handle Bind => raise USYN_ERR "dest_relation" "unexpected term structure"
    else raise USYN_ERR "dest_relation" "not a boolean term";
 
-fun is_WFR (Const(\<^const_name>\<open>Wellfounded.wf\<close>,_)$_) = true
+fun is_WFR \<^Const_>\<open>Wellfounded.wf_on _ for \<^Const_>\<open>top_class.top _\<close> _\<close> = true
   | is_WFR _                 = false;
 
 fun ARB ty = mk_select{Bvar=Free("v",ty),
@@ -2011,8 +2011,7 @@ fun wfrec_definition0 fid R (functional as Abs(x, Ty, _)) thy =
     val def_name = Thm.def_name (Long_Name.base_name fid)
     val wfrec_R_M = map_types poly_tvars (wfrec $ map_types poly_tvars R) $ functional
     val def_term = const_def thy (fid, Ty, wfrec_R_M)
-    val ([def], thy') =
-      Global_Theory.add_defs false [Thm.no_attributes (Binding.name def_name, def_term)] thy
+    val (def, thy') = Global_Theory.add_def (Binding.name def_name, def_term) thy
   in (def, thy') end;
 
 end;

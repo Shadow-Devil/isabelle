@@ -535,6 +535,10 @@ lemma (in topological_space) eventually_at_topological:
   "eventually P (at a within s) \<longleftrightarrow> (\<exists>S. open S \<and> a \<in> S \<and> (\<forall>x\<in>S. x \<noteq> a \<longrightarrow> x \<in> s \<longrightarrow> P x))"
   by (simp add: eventually_nhds eventually_at_filter)
 
+lemma eventually_nhds_conv_at:
+  "eventually P (nhds x) \<longleftrightarrow> eventually P (at x) \<and> P x"
+  unfolding eventually_at_topological eventually_nhds by fast
+
 lemma eventually_at_in_open:
   assumes "open A" "x \<in> A"
   shows   "eventually (\<lambda>y. y \<in> A - {x}) (at x)"
@@ -1076,38 +1080,12 @@ lemma tendsto_Lim: "\<not> trivial_limit net \<Longrightarrow> (f \<longlongrigh
   unfolding Lim_def using tendsto_unique [of net f] by auto
 
 lemma Lim_ident_at: "\<not> trivial_limit (at x within s) \<Longrightarrow> Lim (at x within s) (\<lambda>x. x) = x"
-  by (rule tendsto_Lim[OF _ tendsto_ident_at]) auto
+  by (simp add: tendsto_Lim)
 
 lemma Lim_cong:
-  assumes "eventually (\<lambda>x. f x = g x) F" "F = G"
-  shows   "Lim F f = Lim G g"
-proof (cases "(\<exists>c. (f \<longlongrightarrow> c) F) \<and> F \<noteq> bot")
-  case True
-  then obtain c where c: "(f \<longlongrightarrow> c) F"
-    by blast
-  hence "Lim F f = c"
-    using True by (intro tendsto_Lim) auto
-  moreover have "(f \<longlongrightarrow> c) F \<longleftrightarrow> (g \<longlongrightarrow> c) G"
-    using assms by (intro filterlim_cong) auto
-  with True c assms have "Lim G g = c"
-    by (intro tendsto_Lim) auto
-  ultimately show ?thesis
-    by simp
-next
-  case False
-  show ?thesis
-  proof (cases "F = bot")
-    case True
-    thus ?thesis using assms
-      by (auto simp: Topological_Spaces.Lim_def)
-  next
-    case False
-    have "(f \<longlongrightarrow> c) F \<longleftrightarrow> (g \<longlongrightarrow> c) G" for c
-      using assms by (intro filterlim_cong) auto
-    thus ?thesis
-      by (auto simp: Topological_Spaces.Lim_def)
-  qed
-qed
+  assumes "\<forall>\<^sub>F x in F. f x = g x" "F = G"
+  shows "Lim F f = Lim F g"
+  unfolding t2_space_class.Lim_def using tendsto_cong assms by fastforce
 
 lemma eventually_Lim_ident_at:
   "(\<forall>\<^sub>F y in at x within X. P (Lim (at x within X) (\<lambda>x. x)) y) \<longleftrightarrow>
@@ -1219,6 +1197,11 @@ lemma lim_def: "lim X = (THE L. X \<longlonglongrightarrow> L)"
 lemma lim_explicit:
   "f \<longlonglongrightarrow> f0 \<longleftrightarrow> (\<forall>S. open S \<longrightarrow> f0 \<in> S \<longrightarrow> (\<exists>N. \<forall>n\<ge>N. f n \<in> S))"
   unfolding tendsto_def eventually_sequentially by auto
+
+lemma closed_sequentially:
+  assumes "closed S" and "\<And>n. f n \<in> S" and "f \<longlonglongrightarrow> l"
+  shows "l \<in> S"
+  by (metis Lim_in_closed_set assms eventually_sequentially trivial_limit_sequentially)
 
 
 subsection \<open>Monotone sequences and subsequences\<close>

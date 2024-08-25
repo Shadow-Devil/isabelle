@@ -32,7 +32,6 @@ sig
   val instantiate_inducts : Proof.context -> term list -> term ->
     (((unit -> string) * 'a) * thm) list -> (((unit -> string) * 'a) * thm) list
   val fact_of_lazy_fact : lazy_fact -> fact
-  val is_useful_unnamed_local_fact : Proof.context -> thm -> bool
   val is_likely_tautology_too_meta_or_too_technical: thm -> bool
 
   val all_facts : Proof.context -> bool -> Keyword.keywords -> thm list -> thm list ->
@@ -466,8 +465,7 @@ fun all_facts ctxt generous keywords add_ths chained css =
     val assms = Assumption.all_assms_of ctxt
     val named_locals = Facts.dest_static true [global_facts] local_facts
     val unnamed_locals =
-      Facts.props local_facts
-      |> map #1
+      chained @ map #1 (Facts.props local_facts)
       |> filter (is_useful_unnamed_local_fact ctxt)
       |> map (pair "" o single)
 

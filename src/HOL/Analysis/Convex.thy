@@ -10,8 +10,7 @@ section \<open>Convex Sets and Functions\<close>
 
 theory Convex
 imports
-  Affine
-  "HOL-Library.Set_Algebras"
+  Affine  "HOL-Library.Set_Algebras"  "HOL-Library.FuncSet"
 begin
 
 subsection \<open>Convex Sets\<close>
@@ -302,30 +301,33 @@ qed (auto simp: convex_explicit assms)
 subsection \<open>Convex Functions on a Set\<close>
 
 definition\<^marker>\<open>tag important\<close> convex_on :: "'a::real_vector set \<Rightarrow> ('a \<Rightarrow> real) \<Rightarrow> bool"
-  where "convex_on S f \<longleftrightarrow>
+  where "convex_on S f \<longleftrightarrow> convex S \<and>
     (\<forall>x\<in>S. \<forall>y\<in>S. \<forall>u\<ge>0. \<forall>v\<ge>0. u + v = 1 \<longrightarrow> f (u *\<^sub>R x + v *\<^sub>R y) \<le> u * f x + v * f y)"
 
 definition\<^marker>\<open>tag important\<close> concave_on :: "'a::real_vector set \<Rightarrow> ('a \<Rightarrow> real) \<Rightarrow> bool"
   where "concave_on S f \<equiv> convex_on S (\<lambda>x. - f x)"
 
+lemma convex_on_iff_concave: "convex_on S f = concave_on S (\<lambda>x. - f x)"
+  by (simp add: concave_on_def)
+
 lemma concave_on_iff:
-  "concave_on S f \<longleftrightarrow>
+  "concave_on S f \<longleftrightarrow> convex S \<and>
     (\<forall>x\<in>S. \<forall>y\<in>S. \<forall>u\<ge>0. \<forall>v\<ge>0. u + v = 1 \<longrightarrow> f (u *\<^sub>R x + v *\<^sub>R y) \<ge> u * f x + v * f y)"
   by (auto simp: concave_on_def convex_on_def algebra_simps)
+
+lemma concave_onD:
+  assumes "concave_on A f"
+  shows "\<And>t x y. t \<ge> 0 \<Longrightarrow> t \<le> 1 \<Longrightarrow> x \<in> A \<Longrightarrow> y \<in> A \<Longrightarrow>
+    f ((1 - t) *\<^sub>R x + t *\<^sub>R y) \<ge> (1 - t) * f x + t * f y"
+  using assms by (auto simp: concave_on_iff)
 
 lemma convex_onI [intro?]:
   assumes "\<And>t x y. t > 0 \<Longrightarrow> t < 1 \<Longrightarrow> x \<in> A \<Longrightarrow> y \<in> A \<Longrightarrow>
     f ((1 - t) *\<^sub>R x + t *\<^sub>R y) \<le> (1 - t) * f x + t * f y"
+    and "convex A"
   shows "convex_on A f"
   unfolding convex_on_def
   by (smt (verit, del_insts) assms mult_cancel_right1 mult_eq_0_iff scaleR_collapse scaleR_eq_0_iff)
-
-lemma convex_on_linorderI [intro?]:
-  fixes A :: "('a::{linorder,real_vector}) set"
-  assumes "\<And>t x y. t > 0 \<Longrightarrow> t < 1 \<Longrightarrow> x \<in> A \<Longrightarrow> y \<in> A \<Longrightarrow> x < y \<Longrightarrow>
-    f ((1 - t) *\<^sub>R x + t *\<^sub>R y) \<le> (1 - t) * f x + t * f y"
-  shows "convex_on A f"
-  by (smt (verit, best) add.commute assms convex_onI distrib_left linorder_cases mult.commute mult_cancel_left2 scaleR_collapse)
 
 lemma convex_onD:
   assumes "convex_on A f"
@@ -333,14 +335,36 @@ lemma convex_onD:
     f ((1 - t) *\<^sub>R x + t *\<^sub>R y) \<le> (1 - t) * f x + t * f y"
   using assms by (auto simp: convex_on_def)
 
+lemma convex_on_linorderI [intro?]:
+  fixes A :: "('a::{linorder,real_vector}) set"
+  assumes "\<And>t x y. t > 0 \<Longrightarrow> t < 1 \<Longrightarrow> x \<in> A \<Longrightarrow> y \<in> A \<Longrightarrow> x < y \<Longrightarrow>
+    f ((1 - t) *\<^sub>R x + t *\<^sub>R y) \<le> (1 - t) * f x + t * f y"
+    and "convex A"
+  shows "convex_on A f"
+  by (smt (verit, best) add.commute assms convex_onI distrib_left linorder_cases mult.commute mult_cancel_left2 scaleR_collapse)
+
+lemma concave_on_linorderI [intro?]:
+  fixes A :: "('a::{linorder,real_vector}) set"
+  assumes "\<And>t x y. t > 0 \<Longrightarrow> t < 1 \<Longrightarrow> x \<in> A \<Longrightarrow> y \<in> A \<Longrightarrow> x < y \<Longrightarrow>
+    f ((1 - t) *\<^sub>R x + t *\<^sub>R y) \<ge> (1 - t) * f x + t * f y"
+    and "convex A"
+  shows "concave_on A f"
+  by (smt (verit) assms concave_on_def convex_on_linorderI mult_minus_right)
+
+lemma convex_on_imp_convex: "convex_on A f \<Longrightarrow> convex A"
+  by (auto simp: convex_on_def)
+
+lemma concave_on_imp_convex: "concave_on A f \<Longrightarrow> convex A"
+  by (simp add: concave_on_def convex_on_imp_convex)
+
 lemma convex_onD_Icc:
   assumes "convex_on {x..y} f" "x \<le> (y :: _ :: {real_vector,preorder})"
   shows "\<And>t. t \<ge> 0 \<Longrightarrow> t \<le> 1 \<Longrightarrow>
     f ((1 - t) *\<^sub>R x + t *\<^sub>R y) \<le> (1 - t) * f x + t * f y"
   using assms(2) by (intro convex_onD [OF assms(1)]) simp_all
 
-lemma convex_on_subset: "convex_on t f \<Longrightarrow> S \<subseteq> t \<Longrightarrow> convex_on S f"
-  unfolding convex_on_def by auto
+lemma convex_on_subset: "\<lbrakk>convex_on T f; S \<subseteq> T; convex S\<rbrakk> \<Longrightarrow> convex_on S f"
+  by (simp add: convex_on_def subset_iff)
 
 lemma convex_on_add [intro]:
   assumes "convex_on S f"
@@ -359,8 +383,65 @@ proof -
     then have "f (u *\<^sub>R x + v *\<^sub>R y) + g (u *\<^sub>R x + v *\<^sub>R y) \<le> u * (f x + g x) + v * (f y + g y)"
       by (simp add: field_simps)
   }
-  then show ?thesis
+  with assms show ?thesis
     unfolding convex_on_def by auto
+qed
+
+lemma convex_on_ident: "convex_on S (\<lambda>x. x) \<longleftrightarrow> convex S"
+  by (simp add: convex_on_def)
+
+lemma concave_on_ident: "concave_on S (\<lambda>x. x) \<longleftrightarrow> convex S"
+  by (simp add: concave_on_iff)
+
+lemma convex_on_const: "convex_on S (\<lambda>x. a) \<longleftrightarrow> convex S"
+  by (simp add: convex_on_def flip: distrib_right)
+
+lemma concave_on_const: "concave_on S (\<lambda>x. a) \<longleftrightarrow> convex S"
+  by (simp add: concave_on_iff flip: distrib_right)
+
+lemma convex_on_diff:
+  assumes "convex_on S f" and "concave_on S g"
+  shows "convex_on S (\<lambda>x. f x - g x)"
+  using assms concave_on_def convex_on_add by fastforce
+
+lemma concave_on_diff:
+  assumes "concave_on S f"
+    and "convex_on S g"
+  shows "concave_on S (\<lambda>x. f x - g x)"
+  using convex_on_diff assms concave_on_def by fastforce
+
+lemma concave_on_add:
+  assumes "concave_on S f"
+    and "concave_on S g"
+  shows "concave_on S (\<lambda>x. f x + g x)"
+  using assms convex_on_iff_concave concave_on_diff concave_on_def by fastforce
+
+lemma convex_on_mul:
+  fixes S::"real set"
+  assumes "convex_on S f" "convex_on S g"
+  assumes "mono_on S f" "mono_on S g"
+  assumes fty: "f \<in> S \<rightarrow> {0..}" and gty: "g \<in> S \<rightarrow> {0..}"
+  shows "convex_on S (\<lambda>x. f x*g x)"
+proof (intro convex_on_linorderI)
+  show "convex S"
+    using assms convex_on_imp_convex by auto
+  fix t::real and x y
+  assume t: "0 < t" "t < 1" and xy: "x \<in> S" "y \<in> S" "x<y"
+  have *: "t*(1-t) * f x * g y + t*(1-t) * f y * g x \<le> t*(1-t) * f x * g x + t*(1-t) * f y * g y"
+    using t \<open>mono_on S f\<close> \<open>mono_on S g\<close> xy
+    by (smt (verit, ccfv_SIG) left_diff_distrib mono_onD mult_left_less_imp_less zero_le_mult_iff)
+  have inS: "(1-t)*x + t*y \<in> S"
+    using t xy \<open>convex S\<close> by (simp add: convex_alt)
+  then have "f ((1-t)*x + t*y) * g ((1-t)*x + t*y) \<le> ((1-t) * f x + t * f y)*g ((1-t)*x + t*y)"
+    using convex_onD [OF \<open>convex_on S f\<close>, of t x y] t xy fty gty
+    by (intro mult_mono add_nonneg_nonneg) (auto simp: Pi_iff zero_le_mult_iff)
+  also have "\<dots> \<le> ((1-t) * f x + t * f y) * ((1-t)*g x + t*g y)"
+    using convex_onD [OF \<open>convex_on S g\<close>, of t x y] t xy fty gty inS
+    by (intro mult_mono add_nonneg_nonneg) (auto simp: Pi_iff zero_le_mult_iff)
+  also have "\<dots> \<le> (1-t) * (f x*g x) + t * (f y*g y)"
+    using * by (simp add: algebra_simps)
+  finally show "f ((1-t) *\<^sub>R x + t *\<^sub>R y) * g ((1-t) *\<^sub>R x + t *\<^sub>R y) \<le> (1-t)*(f x*g x) + t*(f y*g y)" 
+    by simp
 qed
 
 lemma convex_on_cmul [intro]:
@@ -375,6 +456,13 @@ proof -
   show ?thesis using assms(2) and mult_left_mono [OF _ assms(1)]
     unfolding convex_on_def and * by auto
 qed
+
+lemma convex_on_cdiv [intro]:
+  fixes c :: real
+  assumes "0 \<le> c" and "convex_on S f"
+  shows "convex_on S (\<lambda>x. f x / c)"
+  unfolding divide_inverse
+  using convex_on_cmul [of "inverse c" S f] by (simp add: mult.commute assms)
 
 lemma convex_lower:
   assumes "convex_on S f"
@@ -396,8 +484,10 @@ qed
 
 lemma convex_on_dist [intro]:
   fixes S :: "'a::real_normed_vector set"
+  assumes "convex S"
   shows "convex_on S (\<lambda>x. dist a x)"
-proof (clarsimp simp: convex_on_def dist_norm)
+unfolding convex_on_def dist_norm
+proof (intro conjI strip)
   fix x y
   assume "x \<in> S" "y \<in> S"
   fix u v :: real
@@ -410,8 +500,52 @@ proof (clarsimp simp: convex_on_def dist_norm)
     by (auto simp: algebra_simps)
   then show "norm (a - (u *\<^sub>R x + v *\<^sub>R y)) \<le> u * norm (a - x) + v * norm (a - y)"
     by (smt (verit, best) \<open>0 \<le> u\<close> \<open>0 \<le> v\<close> norm_scaleR norm_triangle_ineq)
+qed (use assms in auto)
+
+lemma concave_on_mul:
+  fixes S::"real set"
+  assumes f: "concave_on S f" and g: "concave_on S g"
+  assumes "mono_on S f" "antimono_on S g"
+  assumes fty: "f \<in> S \<rightarrow> {0..}" and gty: "g \<in> S \<rightarrow> {0..}"
+  shows "concave_on S (\<lambda>x. f x * g x)"
+proof (intro concave_on_linorderI)
+  show "convex S"
+    using concave_on_imp_convex f by blast
+  fix t::real and x y
+  assume t: "0 < t" "t < 1" and xy: "x \<in> S" "y \<in> S" "x<y"
+  have inS: "(1-t)*x + t*y \<in> S"
+    using t xy \<open>convex S\<close> by (simp add: convex_alt)
+  have "f x * g y + f y * g x \<ge> f x * g x + f y * g y"
+    using \<open>mono_on S f\<close> \<open>antimono_on S g\<close>
+    unfolding monotone_on_def by (smt (verit, best) left_diff_distrib mult_left_mono xy)
+  with t have *: "t*(1-t) * f x * g y + t*(1-t) * f y * g x \<ge> t*(1-t) * f x * g x + t*(1-t) * f y * g y"
+    by (smt (verit, ccfv_SIG) distrib_left mult_left_mono diff_ge_0_iff_ge mult.assoc)
+  have "(1 - t) * (f x * g x) + t * (f y * g y) \<le> ((1-t) * f x + t * f y) * ((1-t) * g x + t * g y)"
+    using * by (simp add: algebra_simps)
+  also have "\<dots> \<le> ((1-t) * f x + t * f y)*g ((1-t)*x + t*y)"
+    using concave_onD [OF \<open>concave_on S g\<close>, of t x y] t xy fty gty inS
+    by (intro mult_mono add_nonneg_nonneg) (auto simp: Pi_iff zero_le_mult_iff)
+  also have "\<dots> \<le> f ((1-t)*x + t*y) * g ((1-t)*x + t*y)"
+    using concave_onD [OF \<open>concave_on S f\<close>, of t x y] t xy fty gty inS
+    by (intro mult_mono add_nonneg_nonneg) (auto simp: Pi_iff zero_le_mult_iff)
+  finally show "(1 - t) * (f x * g x) + t * (f y * g y)
+           \<le> f ((1 - t) *\<^sub>R x + t *\<^sub>R y) * g ((1 - t) *\<^sub>R x + t *\<^sub>R y)" 
+    by simp
 qed
 
+lemma concave_on_cmul [intro]:
+  fixes c :: real
+  assumes "0 \<le> c" and "concave_on S f"
+  shows "concave_on S (\<lambda>x. c * f x)"
+  using assms convex_on_cmul [of c S "\<lambda>x. - f x"]
+  by (auto simp: concave_on_def)
+
+lemma concave_on_cdiv [intro]:
+  fixes c :: real
+  assumes "0 \<le> c" and "concave_on S f"
+  shows "concave_on S (\<lambda>x. f x / c)"
+  unfolding divide_inverse
+  using concave_on_cmul [of "inverse c" S f] by (simp add: mult.commute assms)
 
 subsection\<^marker>\<open>tag unimportant\<close> \<open>Arithmetic operations on sets preserve convexity\<close>
 
@@ -501,7 +635,6 @@ lemma convex_on_sum:
     and f :: "'b \<Rightarrow> real"
   assumes "finite S" "S \<noteq> {}"
     and "convex_on C f"
-    and "convex C"
     and "(\<Sum> i \<in> S. a i) = 1"
     and "\<And>i. i \<in> S \<Longrightarrow> a i \<ge> 0"
     and "\<And>i. i \<in> S \<Longrightarrow> y i \<in> C"
@@ -542,6 +675,8 @@ next
       using i0 by auto
     then have a1: "(\<Sum> j \<in> S. ?a j) = 1"
       unfolding sum_divide_distrib by simp
+    have "convex C"
+      using \<open>convex_on C f\<close> by (simp add: convex_on_def)
     have asum: "(\<Sum> j \<in> S. ?a j *\<^sub>R y j) \<in> C"
       using insert convex_sum [OF \<open>finite S\<close> \<open>convex C\<close> a1 a_nonneg] by auto
     have asum_le: "f (\<Sum> j \<in> S. ?a j *\<^sub>R y j) \<le> (\<Sum> j \<in> S. ?a j * f (y j))"
@@ -566,14 +701,34 @@ next
   qed
 qed
 
+lemma concave_on_sum:
+  fixes a :: "'a \<Rightarrow> real"
+    and y :: "'a \<Rightarrow> 'b::real_vector"
+    and f :: "'b \<Rightarrow> real"
+  assumes "finite S" "S \<noteq> {}"
+    and "concave_on C f" 
+    and "(\<Sum>i \<in> S. a i) = 1"
+    and "\<And>i. i \<in> S \<Longrightarrow> a i \<ge> 0"
+    and "\<And>i. i \<in> S \<Longrightarrow> y i \<in> C"
+  shows "f (\<Sum>i \<in> S. a i *\<^sub>R y i) \<ge> (\<Sum>i \<in> S. a i * f (y i))"
+proof -
+  have "(uminus \<circ> f) (\<Sum>i\<in>S. a i *\<^sub>R y i) \<le> (\<Sum>i\<in>S. a i * (uminus \<circ> f) (y i))"
+  proof (intro convex_on_sum)
+    show "convex_on C (uminus \<circ> f)"
+      by (simp add: assms convex_on_iff_concave)
+  qed (use assms in auto)
+  then show ?thesis
+    by (simp add: sum_negf o_def)
+qed
+
 lemma convex_on_alt:
   fixes C :: "'a::real_vector set"
-  shows "convex_on C f \<longleftrightarrow>
+  shows "convex_on C f \<longleftrightarrow> convex C \<and>
          (\<forall>x \<in> C. \<forall>y \<in> C. \<forall> \<mu> :: real. \<mu> \<ge> 0 \<and> \<mu> \<le> 1 \<longrightarrow>
           f (\<mu> *\<^sub>R x + (1 - \<mu>) *\<^sub>R y) \<le> \<mu> * f x + (1 - \<mu>) * f y)"
   by (smt (verit) convex_on_def)
 
-lemma convex_on_diff:
+lemma convex_on_slope_le:
   fixes f :: "real \<Rightarrow> real"
   assumes f: "convex_on I f"
     and I: "x \<in> I" "y \<in> I"
@@ -732,6 +887,33 @@ lemma f''_le0_imp_concave:
   unfolding concave_on_def
   by (rule assms f''_ge0_imp_convex derivative_eq_intros | simp)+
 
+lemma convex_power_even:
+  assumes "even n"
+  shows "convex_on (UNIV::real set) (\<lambda>x. x^n)"
+proof (intro f''_ge0_imp_convex)
+  show "((\<lambda>x. x ^ n) has_real_derivative of_nat n * x^(n-1)) (at x)" for x
+    by (rule derivative_eq_intros | simp)+
+  show "((\<lambda>x. of_nat n * x^(n-1)) has_real_derivative of_nat n * of_nat (n-1) * x^(n-2)) (at x)" for x
+    by (rule derivative_eq_intros | simp add: eval_nat_numeral)+
+  show "\<And>x. 0 \<le> real n * real (n - 1) * x ^ (n - 2)"
+    using assms by (auto simp: zero_le_mult_iff zero_le_even_power)
+qed auto
+
+lemma convex_power_odd:
+  assumes "odd n"
+  shows "convex_on {0::real..} (\<lambda>x. x^n)"
+proof (intro f''_ge0_imp_convex)
+  show "((\<lambda>x. x ^ n) has_real_derivative of_nat n * x^(n-1)) (at x)" for x
+    by (rule derivative_eq_intros | simp)+
+  show "((\<lambda>x. of_nat n * x^(n-1)) has_real_derivative of_nat n * of_nat (n-1) * x^(n-2)) (at x)" for x
+    by (rule derivative_eq_intros | simp add: eval_nat_numeral)+
+  show "\<And>x. x \<in> {0::real..} \<Longrightarrow> 0 \<le> real n * real (n - 1) * x ^ (n - 2)"
+    using assms by (auto simp: zero_le_mult_iff zero_le_even_power)
+qed auto
+
+lemma convex_power2: "convex_on (UNIV::real set) power2"
+  by (simp add: convex_power_even)
+
 lemma log_concave:
   fixes b :: real
   assumes "b > 1"
@@ -756,6 +938,39 @@ lemma powr_convex:
 lemma exp_convex: "convex_on UNIV exp"
   by (intro f''_ge0_imp_convex derivative_eq_intros | simp)+
 
+text \<open>The AM-GM inequality: the arithmetic mean exceeds the geometric mean.\<close>
+lemma arith_geom_mean:
+  fixes x :: "'a \<Rightarrow> real"
+  assumes "finite S" "S \<noteq> {}"
+    and x: "\<And>i. i \<in> S \<Longrightarrow> x i \<ge> 0"
+  shows "(\<Sum>i \<in> S. x i / card S) \<ge> (\<Prod>i \<in> S. x i) powr (1 / card S)"
+proof (cases "\<exists>i\<in>S. x i = 0")
+  case True
+  then have "(\<Prod>i \<in> S. x i) = 0"
+    by (simp add: \<open>finite S\<close>)
+  moreover have "(\<Sum>i \<in> S. x i / card S) \<ge> 0"
+    by (simp add: sum_nonneg x)
+  ultimately show ?thesis
+    by simp
+next
+  case False
+  have "ln (\<Sum>i \<in> S. (1 / card S) *\<^sub>R x i) \<ge> (\<Sum>i \<in> S. (1 / card S) * ln (x i))"
+  proof (intro concave_on_sum)
+    show "concave_on {0<..} ln"
+      by (simp add: ln_concave)
+    show "\<And>i. i\<in>S \<Longrightarrow> x i \<in> {0<..}"
+      using False x by fastforce
+  qed (use assms False in auto)
+  moreover have "(\<Sum>i \<in> S. (1 / card S) *\<^sub>R x i) > 0"
+    using False assms by (simp add: card_gt_0_iff less_eq_real_def sum_pos)
+  ultimately have "(\<Sum>i \<in> S. (1 / card S) *\<^sub>R x i) \<ge> exp (\<Sum>i \<in> S. (1 / card S) * ln (x i))"
+    using ln_ge_iff by blast
+  then have "(\<Sum>i \<in> S. x i / card S) \<ge> exp (\<Sum>i \<in> S. ln (x i) / card S)"
+    by (simp add: divide_simps)
+  then show ?thesis
+    using assms False
+    by (smt (verit, ccfv_SIG) divide_inverse exp_ln exp_powr_real exp_sum inverse_eq_divide prod.cong prod_powr_distrib) 
+qed
 
 subsection\<^marker>\<open>tag unimportant\<close> \<open>Convexity of real functions\<close>
 
@@ -765,6 +980,11 @@ lemma convex_on_realI:
     and "\<And>x y. x \<in> A \<Longrightarrow> y \<in> A \<Longrightarrow> x \<le> y \<Longrightarrow> f' x \<le> f' y"
   shows "convex_on A f"
 proof (rule convex_on_linorderI)
+  show "convex A"
+    using \<open>connected A\<close> convex_real_interval interval_cases
+    by (smt (verit, ccfv_SIG) connectedD_interval convex_UNIV convex_empty)
+      \<comment> \<open>the equivalence of "connected" and "convex" for real intervals is proved later\<close>
+next
   fix t x y :: real
   assume t: "t > 0" "t < 1"
   assume xy: "x \<in> A" "y \<in> A" "x < y"
@@ -810,7 +1030,7 @@ qed
 
 lemma convex_on_inverse:
   fixes A :: "real set"
-  assumes "A \<subseteq> {0<..}"
+  assumes "A \<subseteq> {0<..}" "convex A"
   shows "convex_on A inverse"
 proof -
   have "convex_on {0::real<..} inverse"
@@ -873,7 +1093,67 @@ proof (cases x y rule: linorder_cases)
   finally show ?thesis .
 qed (use assms in auto)
 
-subsection \<open>Some inequalities\<close>
+lemma concave_onD_Icc:
+  assumes "concave_on {x..y} f" "x \<le> (y :: _ :: {real_vector,preorder})"
+  shows "\<And>t. t \<ge> 0 \<Longrightarrow> t \<le> 1 \<Longrightarrow>
+    f ((1 - t) *\<^sub>R x + t *\<^sub>R y) \<ge> (1 - t) * f x + t * f y"
+  using assms(2) by (intro concave_onD [OF assms(1)]) simp_all
+
+lemma concave_onD_Icc':
+  assumes "concave_on {x..y} f" "c \<in> {x..y}"
+  defines "d \<equiv> y - x"
+  shows "f c \<ge> (f y - f x) / d * (c - x) + f x"
+proof -
+  have "- f c \<le> (f x - f y) / d * (c - x) - f x"
+    using assms convex_onD_Icc' [of x y "\<lambda>x. - f x" c]
+    by (simp add: concave_on_def)
+  then show ?thesis
+    by (smt (verit, best) divide_minus_left mult_minus_left)
+qed
+
+lemma concave_onD_Icc'':
+  assumes "concave_on {x..y} f" "c \<in> {x..y}"
+  defines "d \<equiv> y - x"
+  shows "f c \<ge> (f x - f y) / d * (y - c) + f y"
+proof -
+  have "- f c \<le> (f y - f x) / d * (y - c) - f y"
+    using assms convex_onD_Icc'' [of x y "\<lambda>x. - f x" c]
+    by (simp add: concave_on_def)
+  then show ?thesis
+    by (smt (verit, best) divide_minus_left mult_minus_left)
+qed
+
+lemma convex_on_le_max:
+  fixes a::real
+  assumes "convex_on {x..y} f" and a: "a \<in> {x..y}"
+  shows "f a \<le> max (f x) (f y)"
+proof -
+  have *: "(f y - f x) * (a - x) \<le> (f y - f x) * (y - x)" if "f x \<le> f y"
+    using a that by (intro mult_left_mono) auto
+  have "f a \<le> (f y - f x) / (y - x) * (a - x) + f x" 
+    using assms convex_onD_Icc' by blast
+  also have "\<dots> \<le> max (f x) (f y)"
+    using a *
+    by (simp add: divide_le_0_iff mult_le_0_iff zero_le_mult_iff max_def add.commute mult.commute scaling_mono)
+  finally show ?thesis .
+qed
+
+lemma concave_on_ge_min:
+  fixes a::real
+  assumes "concave_on {x..y} f" and a: "a \<in> {x..y}"
+  shows "f a \<ge> min (f x) (f y)"
+proof -
+  have *: "(f y - f x) * (a - x) \<ge> (f y - f x) * (y - x)" if "f x \<ge> f y"
+    using a that by (intro mult_left_mono_neg) auto
+  have "min (f x) (f y) \<le> (f y - f x) / (y - x) * (a - x) + f x"
+    using a * apply (simp add: zero_le_divide_iff mult_le_0_iff zero_le_mult_iff min_def)
+    by (smt (verit, best) nonzero_eq_divide_eq pos_divide_le_eq)
+  also have "\<dots> \<le> f a"
+    using assms concave_onD_Icc' by blast
+  finally show ?thesis .
+qed
+
+subsection \<open>Some inequalities: Applications of convexity\<close>
 
 lemma Youngs_inequality_0:
   fixes a::real
@@ -911,14 +1191,10 @@ proof (cases "(\<Sum>i\<in>I. (b i)\<^sup>2) > 0")
 next
   case True
   define r where "r \<equiv> (\<Sum>i\<in>I. a i * b i) / (\<Sum>i\<in>I. (b i)\<^sup>2)"
-  with True have *: "(\<Sum>i\<in>I. a i * b i) = r * (\<Sum>i\<in>I. (b i)\<^sup>2)"
-    by simp
   have "0 \<le> (\<Sum>i\<in>I. (a i - r * b i)\<^sup>2)"
-    by (meson sum_nonneg zero_le_power2)
+    by (simp add: sum_nonneg)
   also have "... = (\<Sum>i\<in>I. (a i)\<^sup>2) - 2 * r * (\<Sum>i\<in>I. a i * b i) + r\<^sup>2 * (\<Sum>i\<in>I. (b i)\<^sup>2)"
     by (simp add: algebra_simps power2_eq_square sum_distrib_left flip: sum.distrib)
-  also have "\<dots> = (\<Sum>i\<in>I. (a i)\<^sup>2) - (\<Sum>i\<in>I. a i * b i) * r"
-    by (simp add: * power2_eq_square)
   also have "\<dots> = (\<Sum>i\<in>I. (a i)\<^sup>2) - ((\<Sum>i\<in>I. a i * b i))\<^sup>2 / (\<Sum>i\<in>I. (b i)\<^sup>2)"
     by (simp add: r_def power2_eq_square)
   finally have "0 \<le> (\<Sum>i\<in>I. (a i)\<^sup>2) - ((\<Sum>i\<in>I. a i * b i))\<^sup>2 / (\<Sum>i\<in>I. (b i)\<^sup>2)" .
@@ -927,6 +1203,20 @@ next
   thus "((\<Sum>i\<in>I. a i * b i))\<^sup>2 \<le> (\<Sum>i\<in>I. (a i)\<^sup>2) * (\<Sum>i\<in>I. (b i)\<^sup>2)"
     by (simp add: pos_divide_le_eq True)
 qed
+
+lemma sum_squared_le_sum_of_squares:
+  fixes f :: "'a \<Rightarrow> real"
+  assumes "\<And>i. i\<in>I \<Longrightarrow> f i \<ge> 0" "finite I" "I \<noteq> {}"
+  shows "(\<Sum>i\<in>I. f i)\<^sup>2 \<le> (\<Sum>y\<in>I. (f y)\<^sup>2) * card I"
+proof (cases "finite I \<and> I \<noteq> {}")
+  case True
+  have "(\<Sum>i\<in>I. f i / real (card I))\<^sup>2 \<le> (\<Sum>i\<in>I. (f i)\<^sup>2 / real (card I))"
+    using assms convex_on_sum [OF _ _ convex_power2, where a = "\<lambda>x. 1 / real(card I)" and S=I]
+    by simp
+  then show ?thesis
+    using assms  
+    by (simp add: divide_simps power2_eq_square split: if_split_asm flip: sum_divide_distrib)
+qed auto
 
 subsection \<open>Misc related lemmas\<close>
 
@@ -1773,6 +2063,368 @@ lemma cone_convex_hull:
   shows "cone (convex hull S)"
   by (metis (no_types, lifting) affine_hull_convex_hull affine_hull_eq_empty assms cone_iff convex_hull_scaling hull_inc)
 
+section \<open>Conic sets and conic hull\<close>
+
+definition conic :: "'a::real_vector set \<Rightarrow> bool"
+  where "conic S \<equiv> \<forall>x c. x \<in> S \<longrightarrow> 0 \<le> c \<longrightarrow> (c *\<^sub>R x) \<in> S"
+
+lemma conicD: "\<lbrakk>conic S; x \<in> S; 0 \<le> c\<rbrakk> \<Longrightarrow> (c *\<^sub>R x) \<in> S"
+  by (meson conic_def)
+
+lemma subspace_imp_conic: "subspace S \<Longrightarrow> conic S"
+  by (simp add: conic_def subspace_def)
+
+lemma conic_empty [simp]: "conic {}"
+  using conic_def by blast
+
+lemma conic_UNIV: "conic UNIV"
+  by (simp add: conic_def)
+
+lemma conic_Inter: "(\<And>S. S \<in> \<F> \<Longrightarrow> conic S) \<Longrightarrow> conic(\<Inter>\<F>)"
+  by (simp add: conic_def)
+
+lemma conic_linear_image:
+   "\<lbrakk>conic S; linear f\<rbrakk> \<Longrightarrow> conic(f ` S)"
+  by (smt (verit) conic_def image_iff linear.scaleR)
+
+lemma conic_linear_image_eq:
+   "\<lbrakk>linear f; inj f\<rbrakk> \<Longrightarrow> conic (f ` S) \<longleftrightarrow> conic S"
+  by (smt (verit) conic_def conic_linear_image inj_image_mem_iff linear_cmul)
+
+lemma conic_mul: "\<lbrakk>conic S; x \<in> S; 0 \<le> c\<rbrakk> \<Longrightarrow> (c *\<^sub>R x) \<in> S"
+  using conic_def by blast
+
+lemma conic_conic_hull: "conic(conic hull S)"
+  by (metis (no_types, lifting) conic_Inter hull_def mem_Collect_eq)
+
+lemma conic_hull_eq: "(conic hull S = S) \<longleftrightarrow> conic S"
+  by (metis conic_conic_hull hull_same)
+
+lemma conic_hull_UNIV [simp]: "conic hull UNIV = UNIV"
+  by simp
+
+lemma conic_negations: "conic S \<Longrightarrow> conic (image uminus S)"
+  by (auto simp: conic_def image_iff)
+
+lemma conic_span [iff]: "conic(span S)"
+  by (simp add: subspace_imp_conic)
+
+lemma conic_hull_explicit:
+   "conic hull S = {c *\<^sub>R x| c x. 0 \<le> c \<and> x \<in> S}"
+  proof (rule hull_unique)
+    show "S \<subseteq> {c *\<^sub>R x |c x. 0 \<le> c \<and> x \<in> S}"
+      by (metis (no_types) cone_hull_expl hull_subset)
+  show "conic {c *\<^sub>R x |c x. 0 \<le> c \<and> x \<in> S}"
+    using mult_nonneg_nonneg by (force simp: conic_def)
+qed (auto simp: conic_def)
+
+lemma conic_hull_as_image:
+   "conic hull S = (\<lambda>z. fst z *\<^sub>R snd z) ` ({0..} \<times> S)"
+  by (force simp: conic_hull_explicit)
+
+lemma conic_hull_linear_image:
+   "linear f \<Longrightarrow> conic hull f ` S = f ` (conic hull S)"
+  by (force simp: conic_hull_explicit image_iff set_eq_iff linear_scale) 
+
+lemma conic_hull_image_scale:
+  assumes "\<And>x. x \<in> S \<Longrightarrow> 0 < c x"
+  shows   "conic hull (\<lambda>x. c x *\<^sub>R x) ` S = conic hull S"
+proof
+  show "conic hull (\<lambda>x. c x *\<^sub>R x) ` S \<subseteq> conic hull S"
+  proof (rule hull_minimal)
+    show "(\<lambda>x. c x *\<^sub>R x) ` S \<subseteq> conic hull S"
+      using assms conic_hull_explicit by fastforce
+  qed (simp add: conic_conic_hull)
+  show "conic hull S \<subseteq> conic hull (\<lambda>x. c x *\<^sub>R x) ` S"
+  proof (rule hull_minimal)
+    show "S \<subseteq> conic hull (\<lambda>x. c x *\<^sub>R x) ` S"
+    proof clarsimp
+      fix x
+      assume "x \<in> S"
+      then have "x = inverse(c x) *\<^sub>R c x *\<^sub>R x"
+        using assms by fastforce
+      then show "x \<in> conic hull (\<lambda>x. c x *\<^sub>R x) ` S"
+        by (smt (verit, best) \<open>x \<in> S\<close> assms conic_conic_hull conic_mul hull_inc image_eqI inverse_nonpositive_iff_nonpositive)
+    qed
+  qed (simp add: conic_conic_hull)
+qed
+
+lemma convex_conic_hull:
+  assumes "convex S"
+  shows "convex (conic hull S)"
+proof (clarsimp simp add: conic_hull_explicit convex_alt)
+  fix c x d y and u :: real
+  assume \<section>: "(0::real) \<le> c" "x \<in> S" "(0::real) \<le> d" "y \<in> S" "0 \<le> u" "u \<le> 1"
+  show "\<exists>c'' x''. ((1 - u) * c) *\<^sub>R x + (u * d) *\<^sub>R y = c'' *\<^sub>R x'' \<and> 0 \<le> c'' \<and> x'' \<in> S"
+  proof (cases "(1 - u) * c = 0")
+    case True
+    with \<open>0 \<le> d\<close> \<open>y \<in> S\<close>\<open>0 \<le> u\<close>  
+    show ?thesis by force
+  next
+    case False
+    define \<xi> where "\<xi> \<equiv> (1 - u) * c + u * d"
+    have *: "c * u \<le> c"
+      by (simp add: "\<section>" mult_left_le)
+    have "\<xi> > 0"
+      using False \<section> by (smt (verit, best) \<xi>_def split_mult_pos_le)
+    then have **: "c + d * u = \<xi> + c * u"
+      by (simp add: \<xi>_def mult.commute right_diff_distrib')
+    show ?thesis
+    proof (intro exI conjI)
+      show "0 \<le> \<xi>"
+        using \<open>0 < \<xi>\<close> by auto
+      show "((1 - u) * c) *\<^sub>R x + (u * d) *\<^sub>R y = \<xi> *\<^sub>R (((1 - u) * c / \<xi>) *\<^sub>R x + (u * d / \<xi>) *\<^sub>R y)"
+        using \<open>\<xi> > 0\<close> by (simp add: algebra_simps diff_divide_distrib)
+      show "((1 - u) * c / \<xi>) *\<^sub>R x + (u * d / \<xi>) *\<^sub>R y \<in> S"
+        using \<open>0 < \<xi>\<close> 
+        by (intro convexD [OF assms]) (auto simp: \<section> field_split_simps * **)
+    qed
+  qed
+qed
+
+lemma conic_halfspace_le: "conic {x. a \<bullet> x \<le> 0}"
+  by (auto simp: conic_def mult_le_0_iff)
+
+lemma conic_halfspace_ge: "conic {x. a \<bullet> x \<ge> 0}"
+  by (auto simp: conic_def mult_le_0_iff)
+
+lemma conic_hull_empty [simp]: "conic hull {} = {}"
+  by (simp add: conic_hull_eq)
+
+lemma conic_contains_0: "conic S \<Longrightarrow> (0 \<in> S \<longleftrightarrow> S \<noteq> {})"
+  by (simp add: Convex.cone_def cone_contains_0 conic_def)
+
+lemma conic_hull_eq_empty: "conic hull S = {} \<longleftrightarrow> (S = {})"
+  using conic_hull_explicit by fastforce
+
+lemma conic_sums: "\<lbrakk>conic S; conic T\<rbrakk> \<Longrightarrow> conic (\<Union>x\<in> S. \<Union>y \<in> T. {x + y})"
+  by (simp add: conic_def) (metis scaleR_right_distrib)
+
+lemma conic_Times: "\<lbrakk>conic S; conic T\<rbrakk> \<Longrightarrow> conic(S \<times> T)"
+  by (auto simp: conic_def)
+
+lemma conic_Times_eq:
+   "conic(S \<times> T) \<longleftrightarrow> S = {} \<or> T = {} \<or> conic S \<and> conic T" (is "?lhs = ?rhs")
+proof
+  show "?lhs \<Longrightarrow> ?rhs"
+    by (force simp: conic_def)
+  show "?rhs \<Longrightarrow> ?lhs"
+    by (force simp: conic_Times)
+qed
+
+lemma conic_hull_0 [simp]: "conic hull {0} = {0}"
+  by (simp add: conic_hull_eq subspace_imp_conic)
+
+lemma conic_hull_contains_0 [simp]: "0 \<in> conic hull S \<longleftrightarrow> (S \<noteq> {})"
+  by (simp add: conic_conic_hull conic_contains_0 conic_hull_eq_empty)
+
+lemma conic_hull_eq_sing:
+  "conic hull S = {x} \<longleftrightarrow> S = {0} \<and> x = 0"
+proof
+  show "conic hull S = {x} \<Longrightarrow> S = {0} \<and> x = 0"
+    by (metis conic_conic_hull conic_contains_0 conic_def conic_hull_eq hull_inc insert_not_empty singleton_iff)
+qed simp
+
+lemma conic_hull_Int_affine_hull:
+  assumes "T \<subseteq> S" "0 \<notin> affine hull S"
+  shows "(conic hull T) \<inter> (affine hull S) = T"
+proof -
+  have TaffS: "T \<subseteq> affine hull S"
+    using \<open>T \<subseteq> S\<close> hull_subset by fastforce
+  moreover
+  have "conic hull T \<inter> affine hull S \<subseteq> T"
+  proof (clarsimp simp: conic_hull_explicit)
+    fix c x
+    assume "c *\<^sub>R x \<in> affine hull S"
+      and "0 \<le> c"
+      and "x \<in> T"
+    show "c *\<^sub>R x \<in> T"
+    proof (cases "c=1")
+      case True
+      then show ?thesis
+        by (simp add: \<open>x \<in> T\<close>)
+    next
+      case False
+      then have "x /\<^sub>R (1 - c) = x + (c * inverse (1 - c)) *\<^sub>R x"
+        by (smt (verit, ccfv_SIG) diff_add_cancel mult.commute real_vector_affinity_eq scaleR_collapse scaleR_scaleR)
+      then have "0 = inverse(1 - c) *\<^sub>R c *\<^sub>R x + (1 - inverse(1 - c)) *\<^sub>R x"
+        by (simp add: algebra_simps)
+      then have "0 \<in> affine hull S"
+        by (smt (verit) \<open>c *\<^sub>R x \<in> affine hull S\<close> \<open>x \<in> T\<close> affine_affine_hull TaffS in_mono mem_affine)
+      then show ?thesis
+        using assms by auto        
+    qed
+  qed
+  ultimately show ?thesis
+    by (auto simp: hull_inc)
+qed
+
+
+section \<open>Convex cones and corresponding hulls\<close>
+
+definition convex_cone :: "'a::real_vector set \<Rightarrow> bool"
+  where "convex_cone \<equiv> \<lambda>S. S \<noteq> {} \<and> convex S \<and> conic S"
+
+lemma convex_cone_iff:
+   "convex_cone S \<longleftrightarrow>
+        0 \<in> S \<and> (\<forall>x \<in> S. \<forall>y \<in> S. x + y \<in> S) \<and> (\<forall>x \<in> S. \<forall>c\<ge>0. c *\<^sub>R x \<in> S)"
+    by (metis cone_def conic_contains_0 conic_def convex_cone convex_cone_def)
+
+lemma convex_cone_add: "\<lbrakk>convex_cone S; x \<in> S; y \<in> S\<rbrakk> \<Longrightarrow> x+y \<in> S"
+  by (simp add: convex_cone_iff)
+
+lemma convex_cone_scaleR: "\<lbrakk>convex_cone S; 0 \<le> c; x \<in> S\<rbrakk> \<Longrightarrow> c *\<^sub>R x \<in> S"
+  by (simp add: convex_cone_iff)
+
+lemma convex_cone_nonempty: "convex_cone S \<Longrightarrow> S \<noteq> {}"
+  by (simp add: convex_cone_def)
+
+lemma convex_cone_linear_image:
+   "convex_cone S \<and> linear f \<Longrightarrow> convex_cone(f ` S)"
+  by (simp add: conic_linear_image convex_cone_def convex_linear_image)
+
+lemma convex_cone_linear_image_eq:
+   "\<lbrakk>linear f; inj f\<rbrakk> \<Longrightarrow> (convex_cone(f ` S) \<longleftrightarrow> convex_cone S)"
+  by (simp add: conic_linear_image_eq convex_cone_def)
+
+lemma convex_cone_halfspace_ge: "convex_cone {x. a \<bullet> x \<ge> 0}"
+  by (simp add: convex_cone_iff inner_simps(2))
+
+lemma convex_cone_halfspace_le: "convex_cone {x. a \<bullet> x \<le> 0}"
+  by (simp add: convex_cone_iff inner_right_distrib mult_nonneg_nonpos)
+
+lemma convex_cone_contains_0: "convex_cone S \<Longrightarrow> 0 \<in> S"
+  using convex_cone_iff by blast
+
+lemma convex_cone_Inter:
+   "(\<And>S. S \<in> f \<Longrightarrow> convex_cone S) \<Longrightarrow> convex_cone(\<Inter> f)"
+  by (simp add: convex_cone_iff)
+
+lemma convex_cone_convex_cone_hull: "convex_cone(convex_cone hull S)"
+  by (metis (no_types, lifting) convex_cone_Inter hull_def mem_Collect_eq)
+
+lemma convex_convex_cone_hull: "convex(convex_cone hull S)"
+  by (meson convex_cone_convex_cone_hull convex_cone_def)
+
+lemma conic_convex_cone_hull: "conic(convex_cone hull S)"
+  by (metis convex_cone_convex_cone_hull convex_cone_def)
+
+lemma convex_cone_hull_nonempty: "convex_cone hull S \<noteq> {}"
+  by (simp add: convex_cone_convex_cone_hull convex_cone_nonempty)
+
+lemma convex_cone_hull_contains_0: "0 \<in> convex_cone hull S"
+  by (simp add: convex_cone_contains_0 convex_cone_convex_cone_hull)
+
+lemma convex_cone_hull_add:
+   "\<lbrakk>x \<in> convex_cone hull S; y \<in> convex_cone hull S\<rbrakk> \<Longrightarrow> x + y \<in> convex_cone hull S"
+  by (simp add: convex_cone_add convex_cone_convex_cone_hull)
+
+lemma convex_cone_hull_mul:
+   "\<lbrakk>x \<in> convex_cone hull S; 0 \<le> c\<rbrakk> \<Longrightarrow> (c *\<^sub>R x) \<in> convex_cone hull S"
+  by (simp add: conic_convex_cone_hull conic_mul)
+
+thm convex_sums
+lemma convex_cone_sums:
+   "\<lbrakk>convex_cone S; convex_cone T\<rbrakk> \<Longrightarrow> convex_cone (\<Union>x\<in> S. \<Union>y \<in> T. {x + y})"
+  by (simp add: convex_cone_def conic_sums convex_sums)
+
+lemma convex_cone_Times:
+   "\<lbrakk>convex_cone S; convex_cone T\<rbrakk> \<Longrightarrow> convex_cone(S \<times> T)"
+  by (simp add: conic_Times convex_Times convex_cone_def)
+
+lemma convex_cone_Times_D1: "convex_cone (S \<times> T) \<Longrightarrow> convex_cone S"
+  by (metis Times_empty conic_Times_eq convex_cone_def convex_convex_hull convex_hull_Times hull_same times_eq_iff)
+
+lemma convex_cone_Times_eq:
+   "convex_cone(S \<times> T) \<longleftrightarrow> convex_cone S \<and> convex_cone T" 
+proof (cases "S={} \<or> T={}")
+  case True
+  then show ?thesis 
+    by (auto dest: convex_cone_nonempty)
+next
+  case False
+  then have "convex_cone (S \<times> T) \<Longrightarrow> convex_cone T"
+    by (metis conic_Times_eq convex_cone_def convex_convex_hull convex_hull_Times hull_same times_eq_iff)
+  then show ?thesis
+    using convex_cone_Times convex_cone_Times_D1 by blast 
+qed
+
+
+lemma convex_cone_hull_Un:
+  "convex_cone hull(S \<union> T) = (\<Union>x \<in> convex_cone hull S. \<Union>y \<in> convex_cone hull T. {x + y})"
+  (is "?lhs = ?rhs")
+proof
+  show "?lhs \<subseteq> ?rhs"
+  proof (rule hull_minimal)
+    show "S \<union> T \<subseteq> (\<Union>x\<in>convex_cone hull S. \<Union>y\<in>convex_cone hull T. {x + y})"
+      apply (clarsimp simp: subset_iff)
+      by (metis add_0 convex_cone_hull_contains_0 group_cancel.rule0 hull_inc)
+    show "convex_cone (\<Union>x\<in>convex_cone hull S. \<Union>y\<in>convex_cone hull T. {x + y})"
+      by (simp add: convex_cone_convex_cone_hull convex_cone_sums)
+  qed
+next
+  show "?rhs \<subseteq> ?lhs"
+    by clarify (metis convex_cone_hull_add hull_mono le_sup_iff subsetD subsetI)
+qed
+
+lemma convex_cone_singleton [iff]: "convex_cone {0}"
+  by (simp add: convex_cone_iff)
+
+lemma convex_hull_subset_convex_cone_hull:
+   "convex hull S \<subseteq> convex_cone hull S"
+  by (simp add: convex_convex_cone_hull hull_minimal hull_subset)
+
+lemma conic_hull_subset_convex_cone_hull:
+   "conic hull S \<subseteq> convex_cone hull S"
+  by (simp add: conic_convex_cone_hull hull_minimal hull_subset)
+
+lemma subspace_imp_convex_cone: "subspace S \<Longrightarrow> convex_cone S"
+  by (simp add: convex_cone_iff subspace_def)
+
+lemma convex_cone_span: "convex_cone(span S)"
+  by (simp add: subspace_imp_convex_cone)
+
+lemma convex_cone_negations:
+   "convex_cone S \<Longrightarrow> convex_cone (image uminus S)"
+  by (simp add: convex_cone_linear_image module_hom_uminus)
+
+lemma subspace_convex_cone_symmetric:
+   "subspace S \<longleftrightarrow> convex_cone S \<and> (\<forall>x \<in> S. -x \<in> S)"
+  by (smt (verit) convex_cone_iff scaleR_left.minus subspace_def subspace_neg)
+
+lemma convex_cone_hull_separate_nonempty:
+  assumes "S \<noteq> {}"
+  shows "convex_cone hull S = conic hull (convex hull S)"   (is "?lhs = ?rhs")
+proof
+  show "?lhs \<subseteq> ?rhs"
+    by (metis assms conic_conic_hull convex_cone_def convex_conic_hull convex_convex_hull hull_subset subset_empty subset_hull)
+  show "?rhs \<subseteq> ?lhs"
+    by (simp add: conic_convex_cone_hull convex_hull_subset_convex_cone_hull subset_hull)
+qed
+
+lemma convex_cone_hull_empty [simp]: "convex_cone hull {} = {0}"
+  by (metis convex_cone_hull_contains_0 convex_cone_singleton hull_redundant hull_same)
+
+lemma convex_cone_hull_separate:
+   "convex_cone hull S = insert 0 (conic hull (convex hull S))"
+proof(cases "S={}")
+  case False
+  then show ?thesis
+    using convex_cone_hull_contains_0 convex_cone_hull_separate_nonempty by blast
+qed auto
+
+lemma convex_cone_hull_convex_hull_nonempty:
+   "S \<noteq> {} \<Longrightarrow> convex_cone hull S = (\<Union>x \<in> convex hull S. \<Union>c\<in>{0..}. {c *\<^sub>R x})"
+  by (force simp: convex_cone_hull_separate_nonempty conic_hull_as_image)
+
+lemma convex_cone_hull_convex_hull:
+   "convex_cone hull S = insert 0 (\<Union>x \<in> convex hull S. \<Union>c\<in>{0..}. {c *\<^sub>R x})"
+  by (force simp: convex_cone_hull_separate conic_hull_as_image)
+
+lemma convex_cone_hull_linear_image:
+   "linear f \<Longrightarrow> convex_cone hull (f ` S) = image f (convex_cone hull S)"
+  by (metis (no_types, lifting) conic_hull_linear_image convex_cone_hull_separate convex_hull_linear_image image_insert linear_0)
+
 subsection \<open>Radon's theorem\<close>
 
 text "Formalized by Lars Schewe."
@@ -1949,15 +2601,13 @@ definition\<^marker>\<open>tag important\<close> "epigraph S (f :: _ \<Rightarro
 lemma mem_epigraph: "(x, y) \<in> epigraph S f \<longleftrightarrow> x \<in> S \<and> f x \<le> y"
   unfolding epigraph_def by auto
 
-lemma convex_epigraph: "convex (epigraph S f) \<longleftrightarrow> convex_on S f \<and> convex S"
+lemma convex_epigraph: "convex (epigraph S f) \<longleftrightarrow> convex_on S f"
 proof safe
   assume L: "convex (epigraph S f)"
   then show "convex_on S f"
-    by (auto simp: convex_def convex_on_def epigraph_def)
-  show "convex S"
-    using L by (fastforce simp: convex_def convex_on_def epigraph_def)
+    by (fastforce simp: convex_def convex_on_def epigraph_def)
 next
-  assume "convex_on S f" "convex S"
+  assume "convex_on S f"
   then show "convex (epigraph S f)"
     unfolding convex_def convex_on_def epigraph_def
     apply safe
@@ -1966,15 +2616,14 @@ next
     done
 qed
 
-lemma convex_epigraphI: "convex_on S f \<Longrightarrow> convex S \<Longrightarrow> convex (epigraph S f)"
+lemma convex_epigraphI: "convex_on S f \<Longrightarrow> convex (epigraph S f)"
   unfolding convex_epigraph by auto
 
-lemma convex_epigraph_convex: "convex S \<Longrightarrow> convex_on S f \<longleftrightarrow> convex(epigraph S f)"
+lemma convex_epigraph_convex: "convex_on S f \<longleftrightarrow> convex(epigraph S f)"
   by (simp add: convex_epigraph)
 
 
 subsubsection\<^marker>\<open>tag unimportant\<close> \<open>Use this to derive general bound property of convex function\<close>
-
 
 lemma convex_on:
   assumes "convex S"
@@ -2002,7 +2651,7 @@ proof
 next
   assume "\<forall>k u x. ?rhs k u x"
   then show ?lhs
-  unfolding convex_epigraph_convex[OF assms] convex epigraph_def Ball_def mem_Collect_eq fst_sum snd_sum
+  unfolding convex_epigraph_convex convex epigraph_def Ball_def mem_Collect_eq fst_sum snd_sum
   using assms[unfolded convex] apply clarsimp
   apply (rule_tac y="\<Sum>i = 1..k. u i * f (fst (x i))" in order_trans)
   by (auto simp add: mult_left_mono intro: sum_mono)

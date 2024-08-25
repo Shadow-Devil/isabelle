@@ -112,12 +112,11 @@ object Build_History {
     root: Path,
     progress: Progress = new Progress,
     afp: Boolean = false,
-    afp_partition: Int = 0,
     isabelle_identifier: String = default_isabelle_identifier,
     ml_statistics_step: Int = 1,
     component_repository: String = Components.static_component_repository,
     components_base: String = Components.dynamic_components_base,
-    clean_platforms: Option[List[Platform.Family.Value]] = None,
+    clean_platforms: Option[List[Platform.Family]] = None,
     clean_archives: Boolean = false,
     fresh: Boolean = false,
     hostname: String = "",
@@ -167,22 +166,9 @@ object Build_History {
     }
 
     val isabelle_directory = directory(root)
-    val afp_directory = if (afp) Some(directory(root + Path.explode("AFP"))) else None
-
-    val (afp_build_args, afp_sessions) =
-      if (afp_directory.isEmpty) (Nil, Nil)
-      else {
-        val (opt, sessions) = {
-          if (afp_partition == 0) ("-d", Nil)
-          else {
-            try {
-              val afp_info = AFP.init(options, base_dir = afp_directory.get.root)
-              ("-d", afp_info.partition(afp_partition))
-            } catch { case ERROR(_) => ("-D", Nil) }
-          }
-        }
-        (List(opt, "~~/AFP/thys"), sessions)
-      }
+    val (afp_directory, afp_build_args) =
+      if (afp) (Some(directory(root + Path.explode("AFP"))), List("-d", "~~/AFP/thys"))
+      else (None, Nil)
 
 
     /* main */
@@ -198,7 +184,7 @@ object Build_History {
         clean_archives = clean_archives)
 
     val build_host = proper_string(hostname) getOrElse Isabelle_System.hostname()
-    val build_history_date = Date.now()
+    val build_history_date = progress.now()
     val build_group_id = build_host + ":" + build_history_date.time.ms
 
     var first_build = true
@@ -215,7 +201,8 @@ object Build_History {
         augment_settings(
           other_isabelle, threads, arch_64, arch_apple, heap, max_heap, more_settings)
 
-      File.write(other_isabelle.etc_preferences, cat_lines(more_preferences))
+      File.write(other_isabelle.etc_preferences,
+        cat_lines("build_log_verbose = true" :: more_preferences))
 
       val isabelle_output =
         other_isabelle.expand_path(
@@ -226,13 +213,7 @@ object Build_History {
       if (first_build) {
         resolve_components()
         other_isabelle.scala_build(fresh = fresh, echo = verbose)
-
-        for {
-          tool <- List("ghc_setup", "ocaml_setup")
-          if other_isabelle.getenv("ISABELLE_" + Word.uppercase(tool)) == "true" &&
-            (other_isabelle.isabelle_home + Path.explode("lib/Tools/" + tool)).is_file
-        } other_isabelle.bash("bin/isabelle " + tool, echo = verbose)
-
+        Setup_Tool.init(other_isabelle, verbose = verbose)
         Isabelle_System.rm_tree(isabelle_base_log)
       }
 
@@ -260,25 +241,25 @@ object Build_History {
         Isabelle_System.copy_dir(isabelle_base_log, isabelle_output_log)
       }
 
-      val build_start = Date.now()
+      val build_start = progress.now()
       val build_args1 = List("-v", "-j" + processes) ::: afp_build_args ::: build_args
 
       val build_result =
         Other_Isabelle(root, isabelle_identifier = isabelle_identifier,
           progress = build_out_progress)
-        .bash("bin/isabelle build " + Bash.strings(build_args1 ::: afp_sessions),
+        .bash("bin/isabelle build " + Bash.strings(build_args1),
           redirect = true, echo = true, strict = false)
 
-      val build_end = Date.now()
+      val build_end = progress.now()
+
+      val store = Store(options + "build_database_server=false")
 
       val build_info: Build_Log.Build_Info =
-        Build_Log.Log_File(log_path.file_name, build_result.out_lines).
+        Build_Log.Log_File(log_path.file_name, build_result.out_lines, cache = store.cache).
           parse_build_info(ml_statistics = true)
 
 
       /* output log */
-
-      val store = Store(options + "build_database_server=false")
 
       val meta_info =
         Properties.lines_nonempty(Build_Log.Prop.build_tags.name, build_tags) :::
@@ -296,7 +277,7 @@ object Build_History {
       build_out_progress.echo("Reading session build info ...")
       val session_build_info =
         build_info.finished_sessions.flatMap { session_name =>
-          val database = isabelle_output + store.database(session_name)
+          val database = isabelle_output + Store.log_db(session_name)
 
           if (database.is_file) {
             using(SQLite.open_database(database)) { db =>
@@ -323,15 +304,16 @@ object Build_History {
       build_out_progress.echo("Reading ML statistics ...")
       val ml_statistics =
         build_info.finished_sessions.flatMap { session_name =>
-          val database = isabelle_output + store.database(session_name)
-          val log_gz = isabelle_output + store.log_gz(session_name)
+          val database = isabelle_output + Store.log_db(session_name)
+          val log_gz = isabelle_output + Store.log_gz(session_name)
 
           val properties =
             if (database.is_file) {
               using(SQLite.open_database(database))(store.read_ml_statistics(_, session_name))
             }
             else if (log_gz.is_file) {
-              Build_Log.Log_File(log_gz).parse_session_info(ml_statistics = true).ml_statistics
+              Build_Log.Log_File.read(log_gz.file, cache = store.cache)
+                .parse_session_info(ml_statistics = true).ml_statistics
             }
             else Nil
 
@@ -349,7 +331,7 @@ object Build_History {
       build_out_progress.echo("Reading error messages ...")
       val session_errors =
         build_info.failed_sessions.flatMap { session_name =>
-          val database = isabelle_output + store.database(session_name)
+          val database = isabelle_output + Store.log_db(session_name)
           val errors =
             if (database.is_file) {
               try {
@@ -370,7 +352,7 @@ object Build_History {
         build_info.finished_sessions.flatMap { session_name =>
           val heap = isabelle_output + Path.explode(session_name)
           if (heap.is_file) {
-            Some("Heap " + session_name + " (" + Value.Long(File.space(heap).bytes) + " bytes)")
+            Some("Heap " + session_name + " (" + Value.Long(File.size(heap)) + " bytes)")
           }
           else None
         }
@@ -418,15 +400,14 @@ object Build_History {
     Command_Line.tool {
       var afp = false
       var multicore_base = false
-      var components_base = Components.dynamic_components_base
       var heap: Option[Int] = None
       var max_heap: Option[Int] = None
       var multicore_list = List(default_multicore)
       var isabelle_identifier = default_isabelle_identifier
-      var clean_platforms: Option[List[Platform.Family.Value]] = None
-      var afp_partition = 0
+      var clean_platforms: Option[List[Platform.Family]] = None
       var clean_archives = false
       var component_repository = Components.static_component_repository
+      var components_base = Components.dynamic_components_base
       var arch_apple = false
       var more_settings: List[String] = Nil
       var more_preferences: List[String] = Nil
@@ -445,18 +426,17 @@ Usage: Admin/build_other [OPTIONS] ISABELLE_HOME [ARGS ...]
   Options are:
     -A           include $ISABELLE_HOME/AFP directory
     -B           first multicore build serves as base for scheduling information
-    -C DIR       base directory for Isabelle components (default: """ +
-      quote(Components.dynamic_components_base) + """)
     -H SIZE      minimal ML heap in MB (default: """ + default_heap + """ for 32bit, """ +
       default_heap * 2 + """ for 64bit)
     -M MULTICORE multicore configurations (see below)
     -N NAME      alternative ISABELLE_IDENTIFIER (default: """ + default_isabelle_identifier + """)
     -O PLATFORMS clean resolved components, retaining only the given list
                  platform families (separated by commas; default: do nothing)
-    -P NUMBER    AFP partition number (0, 1, 2, default: 0=unrestricted)
     -Q           clean archives of downloaded components
     -R URL       remote repository for Isabelle components (default: """ +
       Components.static_component_repository + """)
+    -S DIR       base directory for Isabelle components (default: """ +
+      quote(Components.dynamic_components_base) + """)
     -U SIZE      maximal ML heap in MB (default: unbounded)
     -a           processor architecture is Apple Silicon (ARM64)
     -e TEXT      additional text for generated etc/settings
@@ -480,14 +460,13 @@ Usage: Admin/build_other [OPTIONS] ISABELLE_HOME [ARGS ...]
 """,
         "A" -> (_ => afp = true),
         "B" -> (_ => multicore_base = true),
-        "C:" -> (arg => components_base = arg),
         "H:" -> (arg => heap = Some(Value.Int.parse(arg))),
         "M:" -> (arg => multicore_list = space_explode(',', arg).map(Multicore.parse)),
         "N:" -> (arg => isabelle_identifier = arg),
         "O:" -> (arg => clean_platforms = Some(space_explode(',',arg).map(Platform.Family.parse))),
-        "P:" -> (arg => afp_partition = Value.Int.parse(arg)),
         "Q" -> (_ => clean_archives = true),
         "R:" -> (arg => component_repository = arg),
+        "S:" -> (arg => components_base = arg),
         "U:" -> (arg => max_heap = Some(Value.Int.parse(arg))),
         "a" -> (_ => arch_apple = true),
         "e:" -> (arg => more_settings = more_settings ::: List(arg)),
@@ -516,8 +495,7 @@ Usage: Admin/build_other [OPTIONS] ISABELLE_HOME [ARGS ...]
       val progress = new Console_Progress(stderr = true)
 
       val results =
-        local_build(Options.init(), root, progress = progress,
-          afp = afp, afp_partition = afp_partition,
+        local_build(Options.init(), root, progress = progress, afp = afp,
           isabelle_identifier = isabelle_identifier, ml_statistics_step = ml_statistics_step,
           component_repository = component_repository, components_base = components_base,
           clean_platforms = clean_platforms, clean_archives = clean_archives,
@@ -554,6 +532,7 @@ Usage: Admin/build_other [OPTIONS] ISABELLE_HOME [ARGS ...]
     components_base: String = Components.dynamic_components_base,
     clean_platform: Boolean = false,
     clean_archives: Boolean = false,
+    shared_isabelle_self: Boolean = false,
     progress: Progress = new Progress,
     rev: String = "",
     afp_repos: Option[Path] = None,
@@ -573,7 +552,7 @@ Usage: Admin/build_other [OPTIONS] ISABELLE_HOME [ARGS ...]
         rev = rev, afp_rev = afp_rev, afp_root = if (afp) afp_repos else None)
     }
 
-    sync(isabelle_self)
+    if (!shared_isabelle_self) sync(isabelle_self)
 
     val self_isabelle =
       Other_Isabelle(isabelle_self, isabelle_identifier = isabelle_identifier,
@@ -581,7 +560,7 @@ Usage: Admin/build_other [OPTIONS] ISABELLE_HOME [ARGS ...]
 
     val clean_platforms = if (clean_platform) Some(List(ssh.isabelle_platform_family)) else None
 
-    self_isabelle.init(fresh = true, echo = true,
+    self_isabelle.init(fresh = !shared_isabelle_self, echo = true,
       component_repository = component_repository,
       other_settings = self_isabelle.init_components(components_base = components_base),
       clean_platforms = clean_platforms,
@@ -604,7 +583,7 @@ Usage: Admin/build_other [OPTIONS] ISABELLE_HOME [ARGS ...]
           val script =
             ssh.bash_path(Path.explode("Admin/build_other")) +
               " -R " + Bash.string(component_repository) +
-              " -C " + Bash.string(components_base) +
+              " -S " + Bash.string(components_base) +
               (clean_platforms match {
                 case Some(ps) => " -O " + Bash.string(ps.mkString(","))
                 case None => ""

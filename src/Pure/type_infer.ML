@@ -48,9 +48,7 @@ fun mk_param i S = TVar (("?'a", i), S);
 fun anyT S = TFree ("'_dummy_", S);
 
 val paramify_vars =
-  Same.commit
-    (Term_Subst.map_atypsT_same
-      (fn TVar ((x, i), S) => (param i (x, S)) | _ => raise Same.SAME));
+  Term.map_atyps (fn TVar ((x, i), S) => param i (x, S) | _ => raise Same.SAME);
 
 
 
@@ -119,6 +117,6 @@ fun fixate ctxt pattern ts =
     val params = TVars.build (fold TVars.add_tvars ts) |> TVars.list_set;
     val used = (fold o fold_types) Term.declare_typ_names ts (Variable.names_of ctxt);
     val (inst, _) = fold subst_param params (TVars.empty, used);
-  in (map o map_types) (Term_Subst.instantiateT inst) ts end;
+  in (Same.commit o Same.map o Term.map_types_same) (Term_Subst.instantiateT_same inst) ts end;
 
 end;

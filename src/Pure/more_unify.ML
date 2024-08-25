@@ -28,19 +28,24 @@ fun matchers _ [] = Seq.single Envir.init
 
         val maxidx = fold (Term.maxidx_term o #2) pairs ~1;
         val offset = maxidx + 1;
-        val pairs' = map (apfst (Logic.incr_indexes ([], [], offset))) pairs;
+        val pairs' = map (apfst (Logic.incr_indexes ([], offset))) pairs;
         val maxidx' = fold (fn (t, u) => Term.maxidx_term t #> Term.maxidx_term u) pairs' ~1;
 
         val pat_tvars = TVars.build (fold (TVars.add_tvars o #1) pairs');
         val pat_vars = Vars.build (fold (Vars.add_vars o #1) pairs');
 
-        val decr_indexesT =
-          Term.map_atyps (fn T as TVar ((x, i), S) =>
-            if i > maxidx then TVar ((x, i - offset), S) else T | T => T);
+        val decr_indexesT_same =
+          Term.map_atyps_same
+            (fn TVar ((x, i), S) =>
+                if i > maxidx then TVar ((x, i - offset), S) else raise Same.SAME
+              | _ => raise Same.SAME);
+        val decr_indexesT = Same.commit decr_indexesT_same;
         val decr_indexes =
-          Term.map_types decr_indexesT #>
-          Term.map_aterms (fn t as Var ((x, i), T) =>
-            if i > maxidx then Var ((x, i - offset), T) else t | t => t);
+          Term.map_types decr_indexesT_same #>
+          Term.map_aterms
+            (fn Var ((x, i), T) =>
+                if i > maxidx then Var ((x, i - offset), T) else raise Same.SAME
+              | _ => raise Same.SAME);
 
         fun norm_tvar env ((x, i), S) =
           let
