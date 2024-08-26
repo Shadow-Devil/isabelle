@@ -116,7 +116,7 @@ fun run_try0 (st: Proof.state) classified =
   | (possible_combinations, NONE) => (
     "Try0 found nothing after " ^ Int.toString possible_combinations ^ " calls\n", NONE)
 
-fun run_sledgehammer (st: Proof.state) all_dependencies = 
+fun run_sledgehammer (st: Proof.state) all_dependencies only = 
   let
     val params = Sledgehammer_Commands.default_params \<^theory> []
     val four_seconds = Time.fromSeconds 4
@@ -153,7 +153,7 @@ fun run_sledgehammer (st: Proof.state) all_dependencies =
     }  
 
     val fact_override = {
-      add = map (fn thm => (Facts.named thm, [])) all_dependencies, del = [], only = true}
+      add = map (fn thm => (Facts.named thm, [])) all_dependencies, del = [], only = only}
     val (timing, (_, (outcome, try_this))) = Timing.timing (Sledgehammer.run_sledgehammer 
       sledgehammer_timeout_params Sledgehammer_Prover.Normal NONE 1  fact_override) st 
       |> apfst (Time.toMilliseconds o #elapsed)
@@ -177,7 +177,7 @@ in
     | _ => failed_result
 end;
 
-fun find_old (st: Proof.state) = case run_sledgehammer st [] of
+fun find_old (st: Proof.state) = case run_sledgehammer st [] false of
     (log, SOME result) => (log, SOME result)
   | (log, NONE) => (log, NONE)
 
@@ -185,7 +185,7 @@ fun find (st: Proof.state) {all_dependencies, classified} =
   case run_try0 st {simp = [], intro = [], elim = [], dest = []} of
     (log1, SOME result) => (log1, SOME result)
   | (log1, _) =>
-  case run_sledgehammer st all_dependencies of
+  case run_sledgehammer st all_dependencies true of
     (log2, SOME result) => (log1 ^ log2, SOME result)
   | (log2, _) =>
   case run_try0 st classified of
