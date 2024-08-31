@@ -65,7 +65,8 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
     fun run ({pre, spans, pos, post, ...} : Mirabelle.command) : string =
       let
         val ctxt = Toplevel.context_of post
-        val (thms, get_thms_timing) = Mirabelle.cpu_time (get_thms pre) post |> apfst (maps snd)
+        val old = false
+        val (thms, get_thms_timing) = if old then ([], 0) else Mirabelle.cpu_time (get_thms pre) post |> apfst (maps snd)
         val proof_text = get_content spans
 
         val outcome =
@@ -73,9 +74,10 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
             Unknown "segment could not be matched\n"
           else if String.isSubstring "induct" proof_text then
             Unknown "skipped induction proof for performance reasons"
-          else if null thms then
-            (*Timeout.apply generous_timeout proof_improve_old pre proof_text*)
+          else if not old andalso null thms then
             Unknown "Thm could not be found\n"
+          else if old then
+            Timeout.apply generous_timeout proof_improve_old pre proof_text
           else
             Timeout.apply generous_timeout proof_improve proof_text thms ctxt
         val current_data = Synchronized.value data
@@ -88,9 +90,9 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
       in
         Synchronized.change data (fn _ => updated_data);
         cat_lines [
-          "Current Thm: " ^ (map (ATP_Util.short_thm_name ctxt) thms |> space_implode " "),
+          if old then "" else "Current Thm: " ^ (map (ATP_Util.short_thm_name ctxt) thms |> space_implode " "),
           "Outcome: " ^ string_of_outcome outcome,
-          "get_thms_timing: " ^ Int.toString get_thms_timing ^ "ms"]
+          if old then "" else "get_thms_timing: " ^ Int.toString get_thms_timing ^ "ms"]
       end
 
     fun finalize () : string = to_string (Synchronized.value data)
