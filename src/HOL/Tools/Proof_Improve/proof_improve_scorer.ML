@@ -178,14 +178,14 @@ fun score facts proof_text =
     val max_depth  = get_max_depth ()
     val max_apply = get_max_apply ()
 
-    val length_score = normalize_score_int 
+    val length_score = normalize_score_int
                         (normalize_mode, calculate_length_score proof_text, max_length)
     val length_report = "Length score: " ^ Real.toString length_score ^ "\n"
 
     val fact_score = normalize_score_int (normalize_mode, facts, max_lemma)
     val fact_report = "Fact score: " ^ Real.toString fact_score ^ "\n"
 
-    val entropy_score = normalize_score_real 
+    val entropy_score = normalize_score_real
                           (normalize_mode, calculate_entropy_score proof_text, max_entropy)
     val entropy_report = "Entropy score: " ^ Real.toString entropy_score ^ "\n"
 

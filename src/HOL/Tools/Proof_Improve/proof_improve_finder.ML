@@ -6,7 +6,7 @@ Finding proof alternatives using Sledgehammer and try0.
 
 signature PROOF_IMPROVE_FINDER =
 sig
-  val find: Proof.state -> Proof_Improve_Dependency_Analyser.outcome -> 
+  val find: Proof.state -> Proof_Improve_Dependency_Analyser.outcome ->
             string * (int * string) option
   val find_old: Proof.state -> string * (int * string) option
 end;
@@ -36,7 +36,7 @@ fun parse_result (result: string) : string =
       | SOME i => String.substring (result_without_prefix, 0, i)
 
   val result_trimmed =
-    if String.isSuffix (result_without_timing) " " then
+    if String.isSuffix " " (result_without_timing) then
       String.substring (result_without_timing, 0, size result_without_timing - 1)
     else
       result_without_timing
@@ -45,61 +45,62 @@ in
 end;
 
 (* final list is 2^(length xs) long e.g. [[], [1], [2], [3], [1, 2], [1, 3], ...] *)
-fun powerset []: 'a list list = [[]]
-  | powerset (x::xs) =
-      let
-        val rest_subsets = powerset xs
-      in
-         rest_subsets @ (map (fn rest => rest @ [x]) rest_subsets)
-      end;
+fun powerset xs =
+  let
+    fun aux [] acc = map rev acc
+      | aux (x::xs) acc =
+          aux xs (acc @ (map (fn subset => x :: subset) acc))
+  in
+    aux xs [[]]
+  end;
 
 (* final list is length xs long e.g. [[], [1], [1, 2]] *)
-fun take_n_subsets xs = 0 upto (length xs) -1 |> map (fn i => take i xs)
+fun take_n_subsets xs = 0 upto (length xs) |> map (fn i => take i xs);
 
 (* Cartesian product of a list of lists *)
-fun cartesian_product (xss: 'a list list): 'a list list = 
-let 
-  fun helper (xs: 'a list) (acc: 'a list list) = acc |> maps (fn a => 
-       (map (fn x => a @ [x]) xs));
+fun cartesian_product (xss: 'a list list): 'a list list =
+let
+  fun helper (xs: 'a list) (acc: 'a list list) =
+    maps (fn a => map (fn x => x :: a) xs) acc;
 in
-  fold helper xss [[]]
+  fold helper xss [[]] |> map rev
 end;
 
 fun proof_search (st: Proof.state) ({simp, intro, elim, dest} : Try0.try0_params) timeout =
   let
-    fun subsets xs = if length xs < 5 then powerset (rev xs) else 
+    fun subsets xs = if length xs < 5 then powerset xs else
                      if length xs < 20 then take_n_subsets xs else [[], xs]
     val simp_sets = subsets simp;
     val intro_sets = subsets intro;
     val elim_sets = subsets elim;
     val dest_sets = subsets dest;
-    fun apply_try0 [simp_set, intro_set, elim_set, dest_set] = 
+    fun apply_try0 [simp_set, intro_set, elim_set, dest_set] =
       (case Try0.generic_try0 Try0.Non_Interactive (SOME timeout) {
         simp = simp_set,
         intro = intro_set,
         elim = elim_set,
         dest = dest_set
       } st of
-        (true, (name, [message])) => 
-          let 
+        (true, (name, [message])) =>
+          let
             val parsed_message = parse_result message;
-          in 
+          in
             if String.isSubstring "apply" parsed_message then NONE else
             SOME ((name, parsed_message), {
-                simp = simp_set, 
-                intro = intro_set, 
-                elim = elim_set, 
+                simp = simp_set,
+                intro = intro_set,
+                elim = elim_set,
                 dest = dest_set})
-          end 
+          end
       | _ => NONE)
      | apply_try0 _ = NONE;
-     val possible_combinations = cartesian_product [simp_sets, intro_sets, elim_sets, dest_sets];
+     val possible_combinations = cartesian_product [simp_sets, intro_sets, elim_sets, dest_sets]
   in
      (length possible_combinations, possible_combinations |> get_index apply_try0)
 end;
 
-fun run_try0 (st: Proof.state) classified = 
-  case proof_search st classified (Time.fromSeconds 4) of
+fun run_try0 (st: Proof.state) classified timeout =
+  case proof_search st classified timeout of
     (possible_combinations, SOME (calls_made, ((name, message), {simp, intro, elim, dest}))) =>
       let
         val log = space_implode " " [
@@ -116,10 +117,9 @@ fun run_try0 (st: Proof.state) classified =
   | (possible_combinations, NONE) => (
     "Try0 found nothing after " ^ Int.toString possible_combinations ^ " calls\n", NONE)
 
-fun run_sledgehammer (st: Proof.state) all_dependencies only = 
+fun run_sledgehammer (st: Proof.state) all_dependencies only timeout =
   let
     val params = Sledgehammer_Commands.default_params \<^theory> []
-    val four_seconds = Time.fromSeconds 4
 
     val sledgehammer_timeout_params = {
       debug = #debug params,
@@ -147,15 +147,15 @@ fun run_sledgehammer (st: Proof.state) all_dependencies only =
       smt_proofs = #smt_proofs params,
       minimize = #minimize params,
       slices = #slices params,
-      timeout = four_seconds,
-      preplay_timeout = four_seconds,
+      timeout = timeout,
+      preplay_timeout = timeout,
       expect = #expect params
-    }  
+    }
 
     val fact_override = {
       add = map (fn thm => (Facts.named thm, [])) all_dependencies, del = [], only = only}
-    val (timing, (_, (outcome, try_this))) = Timing.timing (Sledgehammer.run_sledgehammer 
-      sledgehammer_timeout_params Sledgehammer_Prover.Normal NONE 1  fact_override) st 
+    val (timing, (_, (outcome, try_this))) = Timing.timing (Sledgehammer.run_sledgehammer
+      sledgehammer_timeout_params Sledgehammer_Prover.Normal NONE 1  fact_override) st
       |> apfst (Time.toMilliseconds o #elapsed)
     val failed_result = ("Sledgehammer failed after " ^ Int.toString timing ^ "ms\n", NONE)
 in
@@ -170,25 +170,25 @@ in
              if String.isSubstring "failed" result orelse String.isSubstring "apply" result then
                failed_result
              else
-               ("Sledgehammer found after " ^ Int.toString timing ^ "ms\n", 
+               ("Sledgehammer found after " ^ Int.toString timing ^ "ms\n",
                  SOME (0(*List.length facts*), result))
            end
          | SOME _ => failed_result)
     | _ => failed_result
 end;
 
-fun find_old (st: Proof.state) = case run_sledgehammer st [] false of
+fun find_old (st: Proof.state) = case run_sledgehammer st [] false (Time.fromSeconds 4) of
     (log, SOME result) => (log, SOME result)
   | (log, NONE) => (log, NONE)
 
 fun find (st: Proof.state) {all_dependencies, classified} =
-  case run_try0 st {simp = [], intro = [], elim = [], dest = []} of
+  case run_try0 st {simp = [], intro = [], elim = [], dest = []} (Time.fromMilliseconds 500) of
     (log1, SOME result) => (log1, SOME result)
   | (log1, _) =>
-  case run_sledgehammer st all_dependencies true of
+  case run_sledgehammer st all_dependencies true (Time.fromSeconds 1) of
     (log2, SOME result) => (log1 ^ log2, SOME result)
   | (log2, _) =>
-  case run_try0 st classified of
+  case run_try0 st classified (Time.fromMilliseconds 300) of
     (log3, SOME result) => (log1 ^ log2 ^ log3, SOME result)
   | (log3, NONE) => (log1 ^ log2 ^ log3, NONE)
 end;
