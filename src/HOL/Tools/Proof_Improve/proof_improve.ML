@@ -12,14 +12,14 @@ sig
                     | GoodEnoughUnderCutoff of string
 
   val proof_improve : string -> thm list -> Proof.context -> outcome
-  val proof_improve_old : Proof.state -> string -> outcome
+  val proof_improve_original : Proof.state -> string -> outcome
   val string_of_outcome : outcome -> string
 end;
 
 structure Proof_Improve : PROOF_IMPROVE =
 struct
 open Proof_Improve_Scorer
-open Proof_Improve_Dependency_Analyser
+open Proof_Improve_Dependency_Analyzer
 open Proof_Improve_Finder
 
 datatype outcome = FoundAlternative of string * string
@@ -71,7 +71,7 @@ fun postprocess_result finder_result initial_log original_score dependency_msg =
       end
 
 
-fun proof_improve_old st proof_text =
+fun proof_improve_original st proof_text =
   let
     val (original_score, original_log) = score
       (List.length [] (*Proof.the_fact_or_facts st*)) proof_text
@@ -83,13 +83,13 @@ fun proof_improve_old st proof_text =
       GoodEnoughUnderCutoff (initial_log ^ "\n\n")
     else
       postprocess_result (
-        Timing.timing find_old st |> apfst (Time.toMilliseconds o #elapsed)
+        Timing.timing find_original st |> apfst (Time.toMilliseconds o #elapsed)
       ) initial_log original_score ""
   end;
 
 fun proof_improve proof_text thms ctxt =
   let
-    val (thm_deps_timing, thm_deps) = Timing.timing (analyse_dependencies ctxt)
+    val (thm_deps_timing, thm_deps) = Timing.timing (analyze_dependencies ctxt)
       thms |> apfst (Time.toMilliseconds o #elapsed);
 
     val is_declared_as_simp = is_standard_simp ctxt thms;
@@ -107,7 +107,6 @@ fun proof_improve proof_text thms ctxt =
     val original_score_msg = "Scorer result (original): " ^ Real.toString original_score
     val initial_log = original_log ^ original_score_msg
     val dependency_log = cat_lines [
-        (*"Filtered dependencies: " ^ @{make_string} (thm_deps),*)
         "Count of deps: " ^ (thm_deps |> #all_dependencies |> length |> Int.toString) ^
         " Simp: " ^ (thm_deps |> #classified |> #simp |> length |> Int.toString) ^
         " Intro: " ^ (thm_deps |> #classified |> #intro |> length |> Int.toString) ^

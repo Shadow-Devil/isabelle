@@ -7,7 +7,7 @@ Datatype to track changes by proof_improve
 signature PROOF_IMPROVE_CHANGES =
 sig
   type proof_changes
-  val create : unit -> proof_changes
+  val empty_changes : proof_changes
   val add_change : string * string * Position.T -> proof_changes -> proof_changes
   val add_unsuccessful_call : proof_changes -> proof_changes
   val to_string : proof_changes -> string
@@ -27,7 +27,7 @@ datatype proof_changes = ProofChanges of {
   successful_changes: int
 }
 
-fun create () = ProofChanges {
+val empty_changes = ProofChanges {
   changes = [],
   total_proofs = 0,
   successful_changes = 0

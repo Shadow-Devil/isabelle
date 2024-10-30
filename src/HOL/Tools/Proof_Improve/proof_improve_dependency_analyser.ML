@@ -3,15 +3,15 @@
 
 This module provides utilities for improving Isabelle proofs.
 *)
-signature PROOF_IMPROVE_DEPENDENCY_ANALYSER =
+signature PROOF_IMPROVE_DEPENDENCY_ANALYZER =
 sig
   type outcome = {all_dependencies: string list, classified: Try0.try0_params}
-  val analyse_dependencies : Proof.context -> thm list -> outcome
+  val analyze_dependencies : Proof.context -> thm list -> outcome
   val is_standard_simp : Proof.context -> thm list -> bool;
   val is_classical : Proof.context -> thm list -> bool;
 end;
 
-structure Proof_Improve_Dependency_Analyser: PROOF_IMPROVE_DEPENDENCY_ANALYSER =
+structure Proof_Improve_Dependency_Analyzer: PROOF_IMPROVE_DEPENDENCY_ANALYZER =
 struct
 type outcome = {all_dependencies: string list, classified: Try0.try0_params};
 
@@ -83,75 +83,74 @@ in
   not (null thms_as_simps) andalso not (all_xs_not_in_ys thms_as_simps simps)
 end;
 
-fun analyse_dependencies (ctxt: Proof.context) thms =
+fun analyze_dependencies (ctxt: Proof.context) thms =
   let
-        val thy = Proof_Context.theory_of ctxt;
-        val ctxt_suppressed_warnings = Context_Position.set_visible false ctxt;
-        val claset = Classical.get_cs (Context.Proof ctxt) |> Classical.rep_cs;
-        val facts = Global_Theory.facts_of thy;
+    val thy = Proof_Context.theory_of ctxt;
+    val ctxt_suppressed_warnings = Context_Position.set_visible false ctxt;
+    val claset = Classical.get_cs (Context.Proof ctxt) |> Classical.rep_cs;
+    val facts = Global_Theory.facts_of thy;
+
+    fun exists_in_facts_table name = Facts.lookup (Context.Theory thy) facts name
+                                      |> Option.isSome
+    fun is_hidden name = Name_Space.extern ctxt (Facts.space_of facts) name
+                          |> Long_Name.is_hidden
+    fun is_protect name = (name = "Pure.protectI" orelse name = "Pure.protectD")
+
+    val thm_deps = thm_dependencies thy thms
+            |> filter (fn name => exists_in_facts_table name andalso
+                                  not (is_hidden name) andalso
+                                  not (is_protect name) andalso
+                                  not (Facts.is_concealed facts name))
+            |> map (fn name =>
+              let
+                val thm_deps = Global_Theory.get_thms thy name
+                val short_name = if length thm_deps = 1 then
+                  ATP_Util.short_thm_name ctxt (the_single thm_deps) else
+                  name
+              in (short_name, thm_deps) end)
+            |> filter_out (fn (short_name, thm_deps) =>
+                forall Sledgehammer_Fact.is_likely_tautology_too_meta_or_too_technical thm_deps)
+
+    (* if for all used thm simplifications there is a simplification in the simpset
+        then it should remove it (since it is unnecessary) *)
+    val thm_deps_without_standard_simps = thm_deps |> filter_out (fn (_, thm_deps) =>
+        is_standard_simp ctxt thm_deps
+    );
+    fun is_intro (name, used_thms) =
+        String.isSuffix (trimr_non_alpha "I") name andalso
+        not (is_standard_SIs used_thms claset) andalso
+        not (is_standard_Is used_thms claset) andalso
+        can (fn x => Classical.addIs (ctxt_suppressed_warnings, x)) used_thms;
+
+    fun is_elim (name, used_thms) =
+        String.isSuffix (trimr_non_alpha "E") name andalso
+        not (is_standard_SEs used_thms claset) andalso
+        not (is_standard_Es used_thms claset) andalso
+        can (fn x => Classical.addEs (ctxt_suppressed_warnings, x)) used_thms;
+
+    fun is_dest (name, used_thms) =
+      String.isSuffix (trimr_non_alpha "D") name andalso
+      not (is_standard_SDs used_thms claset) andalso
+      not (is_standard_Ds used_thms claset) andalso
+      can (fn x => Classical.addDs (ctxt_suppressed_warnings, x)) used_thms;
 
 
-        fun exists_in_facts_table name = Facts.lookup (Context.Theory thy) facts name
-                                          |> Option.isSome
-        fun is_hidden name = Name_Space.extern ctxt (Facts.space_of facts) name
-                              |> Long_Name.is_hidden
-        fun is_protect name = (name = "Pure.protectI" orelse name = "Pure.protectD")
+    val intros = thm_deps_without_standard_simps |> filter is_intro;
+    val elims = thm_deps_without_standard_simps |> filter is_elim;
+    val dest = thm_deps_without_standard_simps |> filter is_dest;
 
-        val thm_deps = thm_dependencies thy thms
-                |> filter (fn name => exists_in_facts_table name andalso
-                                      not (is_hidden name) andalso
-                                      not (is_protect name) andalso
-                                      not (Facts.is_concealed facts name))
-                |> map (fn name =>
-                  let
-                    val thm_deps = Global_Theory.get_thms thy name
-                    val short_name = if length thm_deps = 1 then
-                      ATP_Util.short_thm_name ctxt (the_single thm_deps) else
-                      name
-                  in (short_name, thm_deps) end)
-                |> filter_out (fn (short_name, thm_deps) =>
-                    forall Sledgehammer_Fact.is_likely_tautology_too_meta_or_too_technical thm_deps)
-
-        (* if for all used thm simplifications there is a simplification in the simpset
-           then it should remove it (since it is unnecessary) *)
-        val thm_deps_without_standard_simps = thm_deps |> filter_out (fn (_, thm_deps)  =>
-            is_standard_simp ctxt thm_deps
-        );
-        fun is_intro (name, used_thms) =
-            String.isSuffix (trimr_non_alpha "I") name andalso
-            not (is_standard_SIs used_thms claset) andalso
-            not (is_standard_Is used_thms claset) andalso
-            can (fn x => Classical.addIs (ctxt_suppressed_warnings, x)) used_thms;
-
-        fun is_elim (name, used_thms) =
-            String.isSuffix (trimr_non_alpha "E") name andalso
-            not (is_standard_SEs used_thms claset) andalso
-            not (is_standard_Es used_thms claset) andalso
-            can (fn x => Classical.addEs (ctxt_suppressed_warnings, x)) used_thms;
-
-        fun is_dest (name, used_thms) =
-          String.isSuffix (trimr_non_alpha "D") name andalso
-          not (is_standard_SDs used_thms claset) andalso
-          not (is_standard_Ds used_thms claset) andalso
-          can (fn x => Classical.addDs (ctxt_suppressed_warnings, x)) used_thms;
-
-
-        val intros = thm_deps_without_standard_simps |> filter is_intro;
-        val elims = thm_deps_without_standard_simps |> filter is_elim;
-        val dest = thm_deps_without_standard_simps |> filter is_dest;
-
-        val thm_deps_without_intro_elim_dest = thm_deps_without_standard_simps
-          |> filter (fn (_, simp_thms) =>
-            all_xs_not_in_ys simp_thms (intros |> maps #2) andalso
-            all_xs_not_in_ys simp_thms (elims |> maps #2) andalso
-            all_xs_not_in_ys simp_thms (dest |> maps #2) andalso
-            not (is_standard_SIs simp_thms claset) andalso
-            not (is_standard_Is simp_thms claset) andalso
-            not (is_standard_SEs simp_thms claset) andalso
-            not (is_standard_Es simp_thms claset) andalso
-            not (is_standard_SDs simp_thms claset) andalso
-            not (is_standard_Ds simp_thms claset)
-          );
+    val thm_deps_without_intro_elim_dest = thm_deps_without_standard_simps
+      |> filter (fn (_, simp_thms) =>
+        all_xs_not_in_ys simp_thms (intros |> maps #2) andalso
+        all_xs_not_in_ys simp_thms (elims |> maps #2) andalso
+        all_xs_not_in_ys simp_thms (dest |> maps #2) andalso
+        not (is_standard_SIs simp_thms claset) andalso
+        not (is_standard_Is simp_thms claset) andalso
+        not (is_standard_SEs simp_thms claset) andalso
+        not (is_standard_Es simp_thms claset) andalso
+        not (is_standard_SDs simp_thms claset) andalso
+        not (is_standard_Ds simp_thms claset)
+      );
   in
     {
       all_dependencies = thm_deps_without_standard_simps |> map #1,
@@ -160,7 +159,7 @@ fun analyse_dependencies (ctxt: Proof.context) thms =
         intro = intros |> map #1,
         elim = elims |> map #1,
         dest = dest |> map #1
-        }
+      }
     }
   end;
 end;

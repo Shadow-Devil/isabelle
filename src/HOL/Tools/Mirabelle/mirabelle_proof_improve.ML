@@ -10,7 +10,7 @@ struct
 open Proof_Improve
 open Proof_Improve_Changes
 
-val data = Synchronized.var "Mirabelle_Proof_Improve_data" (create ())
+val data = Synchronized.var "Mirabelle_Proof_Improve_data" empty_changes
 
 fun get_content spans : string =
   let
@@ -60,13 +60,13 @@ fun get_thms (st: Proof.state) (st': Toplevel.state): (string * thm list) list =
 
 fun make_action ({timeout, ...} : Mirabelle.action_context) =
   let
-    val generous_timeout = Time.scale 1000.0 timeout
-
-    fun run ({pre, spans, pos, post, ...} : Mirabelle.command) : string =
+    fun run ({pre, spans, pos, post, ...} : Mirabelle.command) : (proof_changes -> proof_changes) * string =
       let
         val ctxt = Toplevel.context_of post
-        val old = false
-        val (thms, get_thms_timing) = if old then ([], 0) else Mirabelle.cpu_time (get_thms pre) post |> apfst (maps snd)
+        val mode = Proof_Improve_Config_Manager.get_approach ()
+        val (thms, get_thms_timing): (thm list * int) = if mode = "original" then ([], 0) else 
+          Mirabelle.cpu_time ((maps snd) o these o try (Timeout.apply_physical (Time.fromSeconds 5)
+            (get_thms pre))) post
         val proof_text = get_content spans
 
         val outcome =
@@ -74,30 +74,32 @@ fun make_action ({timeout, ...} : Mirabelle.action_context) =
             Unknown "segment could not be matched\n"
           else if String.isSubstring "induct" proof_text then
             Unknown "skipped induction proof for performance reasons"
-          else if not old andalso null thms then
-            Unknown "Thm could not be found\n"
-          else if old then
-            Timeout.apply generous_timeout proof_improve_old pre proof_text
+          else if mode <> "original" andalso null thms then
+            if mode = "combined" then
+              proof_improve_original pre proof_text
+            else
+              Unknown "Thm could not be found\n"
+          else if mode = "original" then
+            proof_improve_original pre proof_text
           else
-            Timeout.apply generous_timeout proof_improve proof_text thms ctxt
-        val current_data = Synchronized.value data
-        val updated_data =
-          case outcome of
+            proof_improve proof_text thms ctxt
+      in
+
+        (fn current_data => case outcome of
             FoundAlternative (found_proof, _) =>
                add_change (proof_text, found_proof, pos) current_data
             | _ =>
-               add_unsuccessful_call current_data
-      in
-        Synchronized.change data (fn _ => updated_data);
-        cat_lines [
-          if old then "" else "Current Thm: " ^ (map (ATP_Util.short_thm_name ctxt) thms |> space_implode " "),
+               add_unsuccessful_call current_data, cat_lines [
+          if mode = "original" then "" else "Current Thm: " ^ (map (ATP_Util.short_thm_name ctxt) thms |> space_implode " "),
           "Outcome: " ^ string_of_outcome outcome,
-          if old then "" else "get_thms_timing: " ^ Int.toString get_thms_timing ^ "ms"]
+          if mode = "original" then "" else "get_thms_timing: " ^ Int.toString get_thms_timing ^ "ms"])
       end
 
     fun finalize () : string = to_string (Synchronized.value data)
   in
-    ("", {run = run, finalize = finalize})
+    ("", {run = fn command => (
+        case Timeout.apply timeout run command 
+        of (f, log) => (Synchronized.change data f; log)), finalize = finalize})
   end
 
 val () = Mirabelle.register_action "proof_improve" make_action

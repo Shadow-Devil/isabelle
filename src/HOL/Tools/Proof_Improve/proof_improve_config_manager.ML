@@ -22,6 +22,7 @@ sig
   val get_max_apply : unit -> int
   val get_normalize_mode : unit -> string
   val get_logging : unit -> bool
+  val get_approach : unit -> string
 end;
 
 structure Proof_Improve_Config_Manager : PROOF_IMPROVE_CONFIG_MANAGER =
@@ -40,7 +41,8 @@ datatype config = Config of {
   max_depth : int,
   max_apply : int,
   normalize_mode : string,
-  logging : bool
+  logging : bool,
+  approach : string
 }
 
 val default_config = Config {
@@ -58,7 +60,8 @@ val default_config = Config {
   max_depth = 5,
   max_apply = 6,
   normalize_mode = "linear", (*can be log/linear*)
-  logging = true
+  logging = true,
+  approach = "combined" (*can be original/new/combined*)
 }
 
 fun get_weight_length () = let val Config cfg = default_config in #weight_length cfg end
@@ -76,4 +79,5 @@ fun get_max_depth () = let val Config cfg = default_config in #max_depth cfg end
 fun get_max_apply () = let val Config cfg = default_config in #max_apply cfg end
 fun get_normalize_mode () = let val Config cfg = default_config in #normalize_mode cfg end
 fun get_logging () = let val Config cfg = default_config in #logging cfg end
+fun get_approach () = let val Config cfg = default_config in #approach cfg end
 end;

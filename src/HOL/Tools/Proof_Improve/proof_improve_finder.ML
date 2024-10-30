@@ -6,9 +6,9 @@ Finding proof alternatives using Sledgehammer and try0.
 
 signature PROOF_IMPROVE_FINDER =
 sig
-  val find: Proof.state -> Proof_Improve_Dependency_Analyser.outcome ->
+  val find: Proof.state -> Proof_Improve_Dependency_Analyzer.outcome ->
             string * (int * string) option
-  val find_old: Proof.state -> string * (int * string) option
+  val find_original: Proof.state -> string * (int * string) option
 end;
 
 structure Proof_Improve_Finder: PROOF_IMPROVE_FINDER =
@@ -40,9 +40,9 @@ fun parse_result (result: string) : string =
       String.substring (result_without_timing, 0, size result_without_timing - 1)
     else
       result_without_timing
-in
-  result_trimmed
-end;
+  in
+    result_trimmed
+  end;
 
 (* final list is 2^(length xs) long e.g. [[], [1], [2], [3], [1, 2], [1, 3], ...] *)
 fun powerset xs =
@@ -59,12 +59,12 @@ fun take_n_subsets xs = 0 upto (length xs) |> map (fn i => take i xs);
 
 (* Cartesian product of a list of lists *)
 fun cartesian_product (xss: 'a list list): 'a list list =
-let
-  fun helper (xs: 'a list) (acc: 'a list list) =
-    maps (fn a => map (fn x => x :: a) xs) acc;
-in
-  fold helper xss [[]] |> map rev
-end;
+  let
+    fun helper (xs: 'a list) (acc: 'a list list) =
+      maps (fn a => map (fn x => x :: a) xs) acc;
+  in
+    fold helper xss [[]] |> map rev
+  end;
 
 fun proof_search (st: Proof.state) ({simp, intro, elim, dest} : Try0.try0_params) timeout =
   let
@@ -75,28 +75,33 @@ fun proof_search (st: Proof.state) ({simp, intro, elim, dest} : Try0.try0_params
     val elim_sets = subsets elim;
     val dest_sets = subsets dest;
     fun apply_try0 [simp_set, intro_set, elim_set, dest_set] =
-      (case Try0.generic_try0 Try0.Non_Interactive (SOME timeout) {
-        simp = simp_set,
-        intro = intro_set,
-        elim = elim_set,
-        dest = dest_set
-      } st of
-        (true, (name, [message])) =>
-          let
-            val parsed_message = parse_result message;
-          in
-            if String.isSubstring "apply" parsed_message then NONE else
-            SOME ((name, parsed_message), {
-                simp = simp_set,
-                intro = intro_set,
-                elim = elim_set,
-                dest = dest_set})
-          end
-      | _ => NONE)
+      let
+        (* Exn.capture0 also captures interrupt breakdowns from stackoverflow, second timeout since the one in try0 does not work *)
+        val result = Exn.capture0 (Timeout.apply_physical (timeout) (Try0.generic_try0 Try0.Non_Interactive (SOME timeout) {
+          simp = simp_set,
+          intro = intro_set,
+          elim = elim_set,
+          dest = dest_set
+        })) st |> Exn.get_res;
+      in
+        (case result of
+          SOME (true, (name, [message])) =>
+            let
+              val parsed_message = parse_result message;
+            in
+              if String.isSubstring "apply" parsed_message then NONE else
+              SOME ((name, parsed_message), {
+                  simp = simp_set,
+                  intro = intro_set,
+                  elim = elim_set,
+                  dest = dest_set})
+            end
+        | _ => NONE)
+      end
      | apply_try0 _ = NONE;
-     val possible_combinations = cartesian_product [simp_sets, intro_sets, elim_sets, dest_sets]
+    val possible_combinations = cartesian_product [simp_sets, intro_sets, elim_sets, dest_sets]
   in
-     (length possible_combinations, possible_combinations |> get_index apply_try0)
+    (length possible_combinations, possible_combinations |> get_index apply_try0)
 end;
 
 fun run_try0 (st: Proof.state) classified timeout =
@@ -158,26 +163,26 @@ fun run_sledgehammer (st: Proof.state) all_dependencies only timeout =
       sledgehammer_timeout_params Sledgehammer_Prover.Normal NONE 1  fact_override) st
       |> apfst (Time.toMilliseconds o #elapsed)
     val failed_result = ("Sledgehammer failed after " ^ Int.toString timing ^ "ms\n", NONE)
-in
-  case outcome of
-      Sledgehammer.SH_Some (prover_result, _) =>
-        (case #outcome prover_result of
-           NONE =>
-           let
-             val facts = #used_facts prover_result
-             val result = parse_result try_this
-           in
-             if String.isSubstring "failed" result orelse String.isSubstring "apply" result then
-               failed_result
-             else
-               ("Sledgehammer found after " ^ Int.toString timing ^ "ms\n",
-                 SOME (0(*List.length facts*), result))
-           end
-         | SOME _ => failed_result)
-    | _ => failed_result
-end;
+  in
+    case outcome of
+        Sledgehammer.SH_Some (prover_result, _) =>
+          (case #outcome prover_result of
+            NONE =>
+            let
+              val facts = #used_facts prover_result
+              val result = parse_result try_this
+            in
+              if String.isSubstring "failed" result orelse String.isSubstring "apply" result then
+                failed_result
+              else
+                ("Sledgehammer found after " ^ Int.toString timing ^ "ms\n",
+                  SOME (0(*List.length facts*), result))
+            end
+          | SOME _ => failed_result)
+      | _ => failed_result
+  end;
 
-fun find_old (st: Proof.state) = case run_sledgehammer st [] false (Time.fromSeconds 4) of
+fun find_original (st: Proof.state) = case run_sledgehammer st [] false (Time.fromSeconds 4) of
     (log, SOME result) => (log, SOME result)
   | (log, NONE) => (log, NONE)
 
